@@ -226,7 +226,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
 <!-- MENU -->
 <div id="screen-menu" class="screen active">
-  <div class="menu-logo">sirt<span class="hi">e</span><span class="hi">T</span></div>
+  <div class="menu-logo">sirte<span class="hi">T</span></div>
   <div class="menu-sub">A FALLING BLOCK GAME</div>
   <div class="menu-btns">
     <button class="menu-btn" onclick="showScreen('screen-setup')"><span>▶</span> Solo Play</button>
@@ -357,13 +357,13 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   <div class="setup-layout">
     <div class="setup-col">
       <div class="settings-group">
-        <div class="settings-group-title">Practice Mode</div>
+        <div class="settings-group-title">Practice Mode <span class="asterisk-note" id="practice-asterisk" style="display:none;color:var(--danger);font-size:11px;font-weight:700;">*</span></div>
         <div class="setting-row"><div class="setting-label">Practice <span id="s-practice-val">Off</span></div>
           <input type="range" id="s-practice" min="0" max="1" step="1" value="0">
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Gravity <span class="asterisk-note" id="grav-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
+        <div class="settings-group-title">Gravity <span class="asterisk-note" id="grav-asterisk" style="display:none;color:var(--danger);font-size:11px;font-weight:700;">*</span></div>
         <div class="setting-row"><div class="setting-label">Type</div>
           <select id="s-grav-mode">
             <option value="leveled">Leveled (scales per level)</option>
@@ -383,7 +383,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Rotation &amp; Kicks <span class="asterisk-note" id="kicks-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
+        <div class="settings-group-title">Rotation &amp; Kicks <span class="asterisk-note" id="kicks-asterisk" style="display:none;color:var(--danger);font-size:11px;font-weight:700;">*</span></div>
         <div class="setting-row"><div class="setting-label">Kick System</div>
           <select id="s-kicks">
             <option value="srs">SRS (Super Rotation System)</option>
@@ -398,7 +398,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Hold <span class="asterisk-note" id="hold-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
+        <div class="settings-group-title">Hold <span class="asterisk-note" id="hold-asterisk" style="display:none;color:var(--danger);font-size:11px;font-weight:700;">*</span></div>
         <div class="setting-row"><div class="setting-label">Hold Mode</div>
           <select id="s-hold">
             <option value="normal">Hold (once per piece)</option>
@@ -428,16 +428,19 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div class="setup-col-narrow"></div>
   </div>
   <div class="setup-actions">
-    <div style="font-size:10px;color:var(--danger);align-self:center;" id="ranked-warning" style="display:none;"></div>
+    <div style="font-size:10px;color:var(--danger);align-self:center;" id="ranked-warning"></div>
     <button class="big-btn" onclick="showScreen('screen-menu')">Cancel</button>
     <button class="big-btn primary" onclick="beginGame()">▶ Play</button>
+  </div>
+  <div id="asterisk-legend" style="display:none;font-size:10px;color:var(--muted);margin-top:6px;width:100%;max-width:820px;">
+    <span style="color:var(--danger);font-weight:700;">*</span> Changing this setting disables ranked scoring. Standard settings for ranked play: Leveled gravity, SRS kicks, Normal hold, Practice off.
   </div>
 </div>
 
 <!-- GAME -->
 <div id="screen-game" class="screen">
   <div class="game-header">
-    <span class="game-header-title">sirt<span class="hi">e</span>T</span>
+    <span class="game-header-title">sirte<span class="hi">T</span></span>
     <span id="game-mode-badge" class="game-mode-badge">MARATHON</span>
     <span id="practice-badge" class="practice-badge" style="display:none;">PRACTICE</span>
     <span id="game-timer" class="game-timer">0:00.000</span>
@@ -455,7 +458,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div id="board-wrap">
       <canvas id="board" width="200" height="400"></canvas>
       <div id="overlay">
-        <h2>sirt<span class="hi">e</span>T</h2>
+        <h2>sirte<span class="hi">T</span></h2>
         <div class="sub">press hard drop to start</div>
       </div>
     </div>
@@ -520,7 +523,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 <!-- VS GAME -->
 <div id="screen-vs" class="screen">
   <div class="vs-header">
-    <span class="game-header-title">sirt<span class="hi">e</span>T — 1v1</span>
+    <span class="game-header-title">sirte<span class="hi">T</span> — 1v1</span>
     <span class="game-mode-badge">LIVE</span>
     <span id="vs-timer" class="game-timer" style="margin-left:auto;">0:00</span>
   </div>
@@ -1001,10 +1004,12 @@ function isRankedSettings() {
 
 function updateAsterisks() {
   const ranked = isRankedMode();
-  ['grav-asterisk','kicks-asterisk','hold-asterisk'].forEach(id => {
+  ['grav-asterisk','kicks-asterisk','hold-asterisk','practice-asterisk'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.style.display = ranked ? 'inline' : 'none';
   });
+  const legend = document.getElementById('asterisk-legend');
+  if(legend) legend.style.display = ranked ? 'block' : 'none';
   const warn = document.getElementById('ranked-warning');
   if(warn) {
     if(ranked && !isRankedSettings()) {
@@ -1077,6 +1082,7 @@ function readSetupCfg() {
 });
 document.getElementById('s-practice').oninput = function() {
   document.getElementById('s-practice-val').textContent = this.value==='1' ? 'On' : 'Off';
+  updateAsterisks();
 };
 document.getElementById('s-grav-mode').onchange = function() {
   document.getElementById('s-static-row').style.display = this.value==='static' ? 'flex' : 'none';
