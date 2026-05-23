@@ -200,6 +200,14 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   75%{opacity:0.7;}100%{opacity:0;}}
 
 /* Firebase status */
+.mode-card{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 10px;cursor:pointer;text-align:left;transition:border-color 0.15s,background 0.15s;color:var(--text);}
+.mode-card:hover{border-color:var(--border2);background:var(--surface2);}
+.mode-card.active{border-color:var(--accent);background:rgba(124,106,247,0.08);}
+.mode-card-name{font-family:'Space Mono',monospace;font-size:13px;margin-bottom:4px;}
+.mode-card-sub{font-size:10px;color:var(--muted);}
+.sub-btn{background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--muted);font-family:'DM Mono',monospace;font-size:12px;padding:6px 16px;cursor:pointer;transition:all 0.15s;}
+.sub-btn:hover{border-color:var(--border2);color:var(--text);}
+.sub-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(124,106,247,0.08);}
 #fb-status{position:fixed;top:10px;right:14px;font-size:10px;color:var(--muted);z-index:400;letter-spacing:0.08em;}
 .fb-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--border2);margin-right:5px;vertical-align:middle;}
 .fb-dot.ok{background:var(--accent2);}
@@ -231,18 +239,37 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
 <!-- STATS -->
 <div id="screen-stats" class="screen">
-  <div class="setup-top" style="margin-bottom:20px;">
+  <div class="setup-top" style="margin-bottom:20px;max-width:820px;">
     <button class="back-btn" onclick="showScreen('screen-menu')">← Back</button>
     <span class="screen-title">Statistics</span>
     <button class="back-btn" onclick="clearStats()" style="color:var(--danger);border-color:var(--danger);">Clear</button>
   </div>
-  <div class="stats-grid" id="stats-grid"></div>
-  <div class="pb-history" style="margin-top:24px;">
-    <div class="pb-history-title">40 Lines Sprint — Best Times</div>
-    <table class="pb-table">
-      <thead><tr><th>#</th><th>Time</th><th>Date</th></tr></thead>
-      <tbody id="sprint-history"></tbody>
-    </table>
+  <div class="stats-grid" id="stats-grid" style="max-width:820px;"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%;max-width:820px;margin-top:20px;">
+    <div class="pb-history">
+      <div class="pb-history-title">Sprint Records</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;" id="sprint-tabs">
+        <button class="sub-btn active" onclick="showSprintTab('20')">20L</button>
+        <button class="sub-btn" onclick="showSprintTab('40')">40L</button>
+        <button class="sub-btn" onclick="showSprintTab('100')">100L</button>
+      </div>
+      <table class="pb-table">
+        <thead><tr><th>#</th><th>Time</th><th>Date</th></tr></thead>
+        <tbody id="sprint-history"></tbody>
+      </table>
+    </div>
+    <div class="pb-history">
+      <div class="pb-history-title">Blitz Records</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;" id="blitz-tabs">
+        <button class="sub-btn active" onclick="showBlitzTab('30s')">30s</button>
+        <button class="sub-btn" onclick="showBlitzTab('1m')">1m</button>
+        <button class="sub-btn" onclick="showBlitzTab('2m')">2m</button>
+      </div>
+      <table class="pb-table">
+        <thead><tr><th>#</th><th>Lines Sent</th><th>Date</th></tr></thead>
+        <tbody id="blitz-history"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -288,30 +315,55 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <span class="screen-title">Game Setup</span>
     <div></div>
   </div>
-  <div class="preset-bar">
-    <button class="preset-btn" onclick="applyPreset('marathon')">Marathon</button>
-    <button class="preset-btn" onclick="applyPreset('sprint')">40L Sprint</button>
-    <button class="preset-btn" onclick="applyPreset('blitz')">Blitz</button>
-    <button class="preset-btn" onclick="applyPreset('zen')">Zen</button>
+
+  <!-- MODE PICKER -->
+  <div style="display:flex;gap:10px;margin-bottom:20px;width:100%;max-width:820px;">
+    <button class="mode-card" id="mc-marathon" onclick="selectMode('marathon')">
+      <div class="mode-card-name">Marathon</div>
+      <div class="mode-card-sub">Endless, rising gravity</div>
+    </button>
+    <button class="mode-card" id="mc-sprint" onclick="selectMode('sprint')">
+      <div class="mode-card-name">Sprint</div>
+      <div class="mode-card-sub">Clear lines fast</div>
+    </button>
+    <button class="mode-card" id="mc-blitz" onclick="selectMode('blitz')">
+      <div class="mode-card-name">Blitz</div>
+      <div class="mode-card-sub">Score in time limit</div>
+    </button>
+    <button class="mode-card" id="mc-zen" onclick="selectMode('zen')">
+      <div class="mode-card-name">Zen</div>
+      <div class="mode-card-sub">No pressure</div>
+    </button>
   </div>
+
+  <!-- SUB-MODE PICKERS -->
+  <div id="sprint-sub" style="display:none;margin-bottom:16px;width:100%;max-width:820px;">
+    <div style="font-size:9px;letter-spacing:0.15em;color:var(--muted);margin-bottom:8px;">GOAL</div>
+    <div style="display:flex;gap:8px;">
+      <button class="sub-btn" id="sb-20" onclick="selectSub('sprint','20')">20 Lines</button>
+      <button class="sub-btn" id="sb-40" onclick="selectSub('sprint','40')">40 Lines</button>
+      <button class="sub-btn" id="sb-100" onclick="selectSub('sprint','100')">100 Lines</button>
+    </div>
+  </div>
+  <div id="blitz-sub" style="display:none;margin-bottom:16px;width:100%;max-width:820px;">
+    <div style="font-size:9px;letter-spacing:0.15em;color:var(--muted);margin-bottom:8px;">DURATION</div>
+    <div style="display:flex;gap:8px;">
+      <button class="sub-btn" id="sb-30s" onclick="selectSub('blitz','30s')">30 sec</button>
+      <button class="sub-btn" id="sb-1m" onclick="selectSub('blitz','1m')">1 min</button>
+      <button class="sub-btn" id="sb-2m" onclick="selectSub('blitz','2m')">2 min</button>
+    </div>
+  </div>
+
   <div class="setup-layout">
     <div class="setup-col">
       <div class="settings-group">
-        <div class="settings-group-title">Game Mode</div>
-        <div class="setting-row"><div class="setting-label">Mode</div>
-          <select id="s-mode">
-            <option value="marathon">Marathon (endless)</option>
-            <option value="sprint">40 Lines Sprint</option>
-            <option value="blitz">Blitz (2 min)</option>
-            <option value="zen">Zen (no game over)</option>
-          </select>
-        </div>
-        <div class="setting-row"><div class="setting-label">Practice Mode <span id="s-practice-val">Off</span></div>
+        <div class="settings-group-title">Practice Mode</div>
+        <div class="setting-row"><div class="setting-label">Practice <span id="s-practice-val">Off</span></div>
           <input type="range" id="s-practice" min="0" max="1" step="1" value="0">
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Gravity</div>
+        <div class="settings-group-title">Gravity <span class="asterisk-note" id="grav-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
         <div class="setting-row"><div class="setting-label">Type</div>
           <select id="s-grav-mode">
             <option value="leveled">Leveled (scales per level)</option>
@@ -331,7 +383,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Rotation & Kicks</div>
+        <div class="settings-group-title">Rotation &amp; Kicks <span class="asterisk-note" id="kicks-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
         <div class="setting-row"><div class="setting-label">Kick System</div>
           <select id="s-kicks">
             <option value="srs">SRS (Super Rotation System)</option>
@@ -346,7 +398,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Hold</div>
+        <div class="settings-group-title">Hold <span class="asterisk-note" id="hold-asterisk" style="display:none;color:var(--danger);font-size:10px;">* affects ranking</span></div>
         <div class="setting-row"><div class="setting-label">Hold Mode</div>
           <select id="s-hold">
             <option value="normal">Hold (once per piece)</option>
@@ -376,6 +428,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div class="setup-col-narrow"></div>
   </div>
   <div class="setup-actions">
+    <div style="font-size:10px;color:var(--danger);align-self:center;" id="ranked-warning" style="display:none;"></div>
     <button class="big-btn" onclick="showScreen('screen-menu')">Cancel</button>
     <button class="big-btn primary" onclick="beginGame()">▶ Play</button>
   </div>
@@ -580,7 +633,7 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   if (id === 'screen-stats') renderStats();
-  if (id === 'screen-setup') updateHandlingSummary();
+  if (id === 'screen-setup') { updateHandlingSummary(); if(!selectedMode) selectMode('marathon'); else selectMode(selectedMode); }
   if (id === 'screen-menu') {
     if (running) { running = false; cancelAnimationFrame(rafId); }
     if (vsRunning) stopVsGame();
@@ -711,7 +764,7 @@ function checkBind(e, action) {
 
 // ── Global settings (persist to localStorage) ─────────────────
 let cfg = {
-  mode:'marathon', practice:false,
+  mode:'marathon', subMode:null, ranked:false, practice:false,
   gravMode:'leveled', gravStatic:1.0,
   das:167, arr:33, sdf:10,
   kicks:'srs', previewCount:5, holdMode:'normal',
@@ -827,14 +880,59 @@ function buildPieceColorPickers() {
 // ── Stats ─────────────────────────────────────────────────────
 function loadStats()  { try { return JSON.parse(localStorage.getItem('sirtet_stats')||'{}'); } catch(e) { return {}; } }
 function saveStats(s) { localStorage.setItem('sirtet_stats', JSON.stringify(s)); }
-function recordSprintTime(ms) {
+
+// subKey: '20','40','100' for sprint; '30s','1m','2m' for blitz
+function recordSprintTime(ms, subKey) {
   const s = loadStats();
-  if (!s.sprintTimes) s.sprintTimes = [];
-  s.sprintTimes.push({ ms, date: new Date().toISOString() });
-  s.sprintTimes.sort((a,b) => a.ms-b.ms);
-  if (s.sprintTimes.length > 20) s.sprintTimes = s.sprintTimes.slice(0,20);
-  if (!s.bestSprint || ms < s.bestSprint) s.bestSprint = ms;
+  const key = 'sprint_' + subKey;
+  if (!s[key]) s[key] = [];
+  s[key].push({ ms, date: new Date().toISOString() });
+  s[key].sort((a,b) => a.ms - b.ms);
+  if (s[key].length > 20) s[key] = s[key].slice(0,20);
   saveStats(s);
+}
+function recordBlitzScore(lines, subKey) {
+  const s = loadStats();
+  const key = 'blitz_' + subKey;
+  if (!s[key]) s[key] = [];
+  s[key].push({ lines, date: new Date().toISOString() });
+  s[key].sort((a,b) => b.lines - a.lines); // highest first
+  if (s[key].length > 20) s[key] = s[key].slice(0,20);
+  saveStats(s);
+}
+
+let statsSprintTab = '40', statsBlitzTab = '30s';
+window.showSprintTab = function(t) {
+  statsSprintTab = t;
+  document.querySelectorAll('#sprint-tabs .sub-btn').forEach(b => b.classList.toggle('active', b.textContent.replace('L','')===t));
+  renderSprintHistory();
+};
+window.showBlitzTab = function(t) {
+  statsBlitzTab = t;
+  document.querySelectorAll('#blitz-tabs .sub-btn').forEach(b => b.classList.toggle('active', b.textContent===t));
+  renderBlitzHistory();
+};
+function renderSprintHistory() {
+  const s = loadStats();
+  const times = (s['sprint_' + statsSprintTab] || []);
+  document.getElementById('sprint-history').innerHTML = !times.length
+    ? '<tr><td colspan="3" style="color:var(--muted);padding:10px 8px;">No records yet</td></tr>'
+    : times.slice(0,10).map((t,i) => `<tr>
+        <td class="${i===0?'gold':''}">${i===0?'🥇':i+1}</td>
+        <td class="${i===0?'gold':''}" style="font-family:'Space Mono',monospace;">${fmtTime(t.ms)}</td>
+        <td style="color:var(--muted);font-size:11px;">${new Date(t.date).toLocaleDateString()}</td>
+      </tr>`).join('');
+}
+function renderBlitzHistory() {
+  const s = loadStats();
+  const scores = (s['blitz_' + statsBlitzTab] || []);
+  document.getElementById('blitz-history').innerHTML = !scores.length
+    ? '<tr><td colspan="3" style="color:var(--muted);padding:10px 8px;">No records yet</td></tr>'
+    : scores.slice(0,10).map((t,i) => `<tr>
+        <td class="${i===0?'gold':''}">${i===0?'🥇':i+1}</td>
+        <td class="${i===0?'gold':''}" style="font-family:'Space Mono',monospace;">${t.lines} lines</td>
+        <td style="color:var(--muted);font-size:11px;">${new Date(t.date).toLocaleDateString()}</td>
+      </tr>`).join('');
 }
 function fmtTime(ms) {
   if (ms == null) return '--';
@@ -843,25 +941,86 @@ function fmtTime(ms) {
 }
 function renderStats() {
   const s = loadStats();
+  const best40 = s.sprint_40 && s.sprint_40[0];
+  const bestBlitz2m = s.blitz_2m && s.blitz_2m[0];
   document.getElementById('stats-grid').innerHTML = `
     <div class="stat-card"><div class="stat-card-label">Best 40L Sprint</div>
-      <div class="stat-card-val accent">${s.bestSprint ? fmtTime(s.bestSprint) : '--'}</div>
-      <div class="stat-card-sub">fastest clear</div></div>
-    <div class="stat-card"><div class="stat-card-label">Sprint Attempts</div>
-      <div class="stat-card-val">${s.sprintTimes ? s.sprintTimes.length : 0}</div></div>
+      <div class="stat-card-val accent">${best40 ? fmtTime(best40.ms) : '--'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Best 2m Blitz</div>
+      <div class="stat-card-val accent">${bestBlitz2m ? bestBlitz2m.lines+' lines' : '--'}</div></div>
     <div class="stat-card"><div class="stat-card-label">Games Played</div>
       <div class="stat-card-val">${s.gamesPlayed||0}</div></div>
     <div class="stat-card"><div class="stat-card-label">Total Lines</div>
       <div class="stat-card-val">${s.totalLines||0}</div></div>`;
-  const times = s.sprintTimes || [];
-  document.getElementById('sprint-history').innerHTML = !times.length
-    ? '<tr><td colspan="3" style="color:var(--muted);padding:12px 8px;">No sprint times yet</td></tr>'
-    : times.slice(0,10).map((t,i) => `<tr>
-        <td class="${i===0?'gold':''}">${i===0?'🥇':i+1}</td>
-        <td class="${i===0?'gold':''}" style="font-family:'Space Mono',monospace;">${fmtTime(t.ms)}</td>
-        <td style="color:var(--muted);font-size:11px;">${new Date(t.date).toLocaleDateString()}</td>
-      </tr>`).join('');
+  renderSprintHistory();
+  renderBlitzHistory();
 }
+
+// ── Mode / Sub-mode selection ─────────────────────────────────
+let selectedMode = 'marathon', selectedSub = null;
+
+// Standard settings for ranked play
+const RANKED_DEFAULTS = { gravMode:'leveled', kicks:'srs', holdMode:'normal' };
+
+window.selectMode = function(mode) {
+  selectedMode = mode;
+  selectedSub = null;
+  // Update card UI
+  ['marathon','sprint','blitz','zen'].forEach(m => {
+    document.getElementById('mc-'+m).classList.toggle('active', m===mode);
+  });
+  // Show/hide sub-pickers
+  document.getElementById('sprint-sub').style.display = mode==='sprint' ? 'block' : 'none';
+  document.getElementById('blitz-sub').style.display  = mode==='blitz'  ? 'block' : 'none';
+  // Auto-select default sub
+  if (mode==='sprint') { selectSub('sprint','40'); return; }
+  if (mode==='blitz')  { selectSub('blitz','2m'); return; }
+  updateAsterisks();
+};
+
+window.selectSub = function(mode, sub) {
+  selectedSub = sub;
+  // Clear all sub-btn actives in the relevant group
+  const grp = mode==='sprint' ? 'sprint-sub' : 'blitz-sub';
+  document.querySelectorAll('#'+grp+' .sub-btn').forEach(b => b.classList.remove('active'));
+  const map = {'20':'sb-20','40':'sb-40','100':'sb-100','30s':'sb-30s','1m':'sb-1m','2m':'sb-2m'};
+  const el = document.getElementById(map[sub]); if(el) el.classList.add('active');
+  updateAsterisks();
+};
+
+function isRankedMode() {
+  return (selectedMode==='sprint' || selectedMode==='blitz') && !cfg.practice;
+}
+
+function isRankedSettings() {
+  // Settings match defaults required for ranked
+  return cfg.gravMode === RANKED_DEFAULTS.gravMode
+    && cfg.kicks === RANKED_DEFAULTS.kicks
+    && document.getElementById('s-hold').value === RANKED_DEFAULTS.holdMode;
+}
+
+function updateAsterisks() {
+  const ranked = isRankedMode();
+  ['grav-asterisk','kicks-asterisk','hold-asterisk'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.style.display = ranked ? 'inline' : 'none';
+  });
+  const warn = document.getElementById('ranked-warning');
+  if(warn) {
+    if(ranked && !isRankedSettings()) {
+      warn.textContent = '⚠ Non-standard settings — score won\'t count in records';
+      warn.style.display = 'block';
+    } else {
+      warn.style.display = 'none';
+    }
+  }
+}
+
+// Watch for setting changes that affect ranking
+['s-grav-mode','s-kicks','s-hold'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('change', updateAsterisks);
+});
 
 // ── Presets ───────────────────────────────────────────────────
 const PRESETS = {
@@ -886,7 +1045,9 @@ function applyPreset(name) {
 }
 
 function readSetupCfg() {
-  cfg.mode        = document.getElementById('s-mode').value;
+  cfg.mode        = selectedMode;
+  cfg.subMode     = selectedSub;
+  cfg.ranked      = isRankedMode() && isRankedSettings();
   cfg.practice    = document.getElementById('s-practice').value === '1';
   cfg.gravMode    = document.getElementById('s-grav-mode').value;
   cfg.gravStatic  = parseFloat(document.getElementById('s-grav').value);
@@ -984,7 +1145,8 @@ let lastTime, dropAcc, sprintStartMs, timerRunning, gameStartMs;
 let lockTimer=null, lockFlashTimer=null, lockFlashing=false, lockBright=true;
 let lockMoves=0;
 let undoStack=[], redoStack=[];
-const BLITZ_DUR = 120000;
+const BLITZ_DUR = 120000; // default 2min; actual duration computed in startGame
+let blitzDuration = 120000;
 let timerInterval = null;
 
 function saveUndo() {
@@ -1091,29 +1253,87 @@ function doLock() {
   }
   clearLines(); spawnNext(); holdUsed=false;
 }
+// ── Attack system ────────────────────────────────────────────
+let b2bCount = 0; // back-to-back counter (consecutive quads/T-spins)
+let comboCount = 0; // consecutive clears
+
+function calcB2BBonus(base) {
+  // B2B bonus: extra lines on top of base attack
+  if (b2bCount <= 0)  return 0;
+  if (b2bCount <= 2)  return 0;
+  if (b2bCount <= 5)  return 1;
+  if (b2bCount <= 10) return 2;
+  if (b2bCount <= 20) return 3;
+  if (b2bCount <= 50) return 4;
+  if (b2bCount <= 100)return 5;
+  return 6;
+}
+
+function calcComboAttack(base, combo) {
+  // ceil(0.00001 + base*(1 + 0.2*combo - 0.01))
+  return Math.ceil(0.00001 + base * (1 + 0.2*combo - 0.01));
+}
+
+function calcAttack(cleared, isPerfect) {
+  if (isPerfect) return 8;
+  const base = [0, 0, 1, 2, 4][cleared] || 0;
+  if (base === 0) return 0;
+  const isSpecial = cleared >= 4; // quad counts as B2B eligible
+  const b2bBonus = isSpecial ? calcB2BBonus(base) : 0;
+  const withB2B = base + b2bBonus;
+  if (comboCount > 0) return calcComboAttack(withB2B, comboCount);
+  return withB2B;
+}
+
+function updateB2BCombo(cleared, isPerfect) {
+  const isSpecial = isPerfect || cleared >= 4;
+  if (cleared > 0) {
+    comboCount++;
+    if (isSpecial) b2bCount++;
+    else b2bCount = 0;
+  } else {
+    comboCount = 0;
+    // b2bCount persists until a non-special clear
+  }
+}
+
 function clearLines() {
-  let cleared=0;
-  for (let r=ROWS-1;r>=0;r--) {
+  let cleared = 0;
+  for (let r=ROWS-1; r>=0; r--) {
     if (grid[r].every(c=>c)) { grid.splice(r,1); grid.unshift(Array(COLS).fill(null)); cleared++; r++; }
   }
-  if (cleared) {
-    score += [0,100,300,500,800][cleared]*level;
-    lines += cleared; level=Math.floor(lines/10)+1;
-    document.getElementById('score').textContent=score;
-    document.getElementById('lines').textContent=lines;
-    document.getElementById('level').textContent=level;
-    if (cfg.mode==='sprint') {
-      document.getElementById('sprint-left').textContent=Math.max(0,40-lines);
-      if (lines>=40) completeSprint();
-    }
+  if (cleared === 0) { comboCount = 0; return; }
+
+  const isPerfect = grid.every(row => row.every(c=>!c));
+  const attack = calcAttack(cleared, isPerfect);
+  updateB2BCombo(cleared, isPerfect);
+
+  // Scoring — blitz uses attack (garbage lines sent), others use point formula
+  if (cfg.mode === 'blitz') {
+    score += attack; // score = total lines sent
+  } else {
+    score += [0,100,300,500,800][cleared] * level;
+  }
+  lines += cleared;
+  level = Math.floor(lines/10)+1;
+  document.getElementById('score').textContent = score;
+  document.getElementById('lines').textContent  = lines;
+  document.getElementById('level').textContent  = level;
+
+  if (cfg.mode === 'sprint') {
+    const goal = parseInt(cfg.subMode) || 40;
+    document.getElementById('sprint-left').textContent = Math.max(0, goal-lines);
+    if (lines >= goal) completeSprint();
   }
 }
 function completeSprint() {
-  const elapsed=performance.now()-sprintStartMs;
-  timerRunning=false; running=false; recordSprintTime(elapsed);
-  const ov=document.getElementById('overlay');
-  ov.innerHTML=`<h2 style="color:var(--accent2)">SPRINT DONE</h2><div class="time-display">${fmtTime(elapsed)}</div><div class="sub">press hard drop to restart</div>`;
-  ov.style.display='flex';
+  const elapsed = performance.now() - sprintStartMs;
+  timerRunning = false; running = false;
+  if (cfg.ranked) recordSprintTime(elapsed, cfg.subMode || '40');
+  const ov = document.getElementById('overlay');
+  const ranked_note = cfg.ranked ? '' : '<div style="font-size:10px;color:var(--warn);margin-top:4px;">non-standard settings — not ranked</div>';
+  ov.innerHTML = `<h2 style="color:var(--accent2)">SPRINT DONE</h2><div class="time-display">${fmtTime(elapsed)}</div>${ranked_note}<div class="sub">press hard drop to restart</div>`;
+  ov.style.display = 'flex';
 }
 function spawnNext() {
   piece=mkPiece(soloDequeue());
@@ -1213,16 +1433,16 @@ function loop(ts) {
 }
 
 function startGame() {
-  grid=mkGrid(); score=0; lines=0; level=1; dropAcc=0;
+  grid=mkGrid(); score=0; lines=0; level=1; dropAcc=0; b2bCount=0; comboCount=0;
   soloBag=[]; soloQueue=[]; heldKey=null; holdUsed=false;
   undoStack=[]; redoStack=[]; cancelLock();
   ['score','lines','level'].forEach(id=>document.getElementById(id).textContent=id==='level'?'1':'0');
   document.getElementById('game-mode-badge').textContent=
-    {marathon:'MARATHON',sprint:'40L SPRINT',blitz:'BLITZ',zen:'ZEN'}[cfg.mode]||cfg.mode.toUpperCase();
+    ({marathon:'MARATHON',sprint:(cfg.subMode||'40')+'L SPRINT',blitz:'BLITZ '+(cfg.subMode||'2m').toUpperCase(),zen:'ZEN'}[cfg.mode]||cfg.mode.toUpperCase());
   document.getElementById('sprint-target-row').style.display=cfg.mode==='sprint'?'flex':'none';
-  document.getElementById('sprint-left').textContent='40';
+  document.getElementById('sprint-left').textContent=cfg.subMode||'40';
   document.getElementById('practice-badge').style.display=cfg.practice?'inline':'none';
-  document.getElementById('game-timer').textContent=cfg.mode==='blitz'?fmtTime(BLITZ_DUR):'0:00.000';
+  document.getElementById('game-timer').textContent=cfg.mode==='blitz'?fmtTime(blitzDuration):'0:00.000';
   gameStartMs=sprintStartMs=performance.now();
   soloEnsureQueue(); spawnNext(); buildPreviews(); drawHold();
   running=true; paused=false;
@@ -1232,8 +1452,9 @@ function startGame() {
   if(timerInterval) clearInterval(timerInterval);
   timerInterval=setInterval(()=>{
     if(!timerRunning||paused) return;
-    if(cfg.mode==='blitz'){
-      const rem=Math.max(0,BLITZ_DUR-(performance.now()-gameStartMs));
+    blitzDuration = {'30s':30000,'1m':60000,'2m':120000}[cfg.subMode] || 120000;
+  if(cfg.mode==='blitz'){
+      const rem=Math.max(0,blitzDuration-(performance.now()-gameStartMs));
       document.getElementById('game-timer').textContent=fmtTime(rem);
       if(rem<=0) triggerGameOver();
     } else {
@@ -1248,7 +1469,14 @@ function triggerGameOver() {
   if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
   const st=loadStats(); st.totalLines=(st.totalLines||0)+lines; saveStats(st);
   const ov=document.getElementById('overlay');
-  ov.innerHTML=`<h2>GAME OVER</h2><div class="score-display">${score}</div><div class="sub">press hard drop to restart</div>`;
+  if (cfg.mode === 'blitz') {
+    // Blitz ends — score = lines sent (attack)
+    if (cfg.ranked) recordBlitzScore(score, cfg.subMode || '2m');
+    const ranked_note = cfg.ranked ? '' : '<div style="font-size:10px;color:var(--warn);margin-top:4px;">non-standard settings — not ranked</div>';
+    ov.innerHTML = `<h2 style="color:var(--accent2)">TIME'S UP</h2><div class="score-display">${score} <span style="font-size:16px;color:var(--muted)">lines sent</span></div>${ranked_note}<div class="sub">press hard drop to restart</div>`;
+  } else {
+    ov.innerHTML = `<h2>GAME OVER</h2><div class="score-display">${score}</div><div class="sub">press hard drop to restart</div>`;
+  }
   ov.style.display='flex';
 }
 
@@ -1789,6 +2017,7 @@ syncSettingsUI();
 buildKeybindTable();
 buildPieceColorPickers();
 updateHandlingSummary();
+selectMode('marathon'); // init mode picker UI
 
 // Initial blank draws
 [boardEl, vsBoardEl, vsOppEl].forEach(c=>{c.getContext('2d').fillStyle='#0a0a0c';c.getContext('2d').fillRect(0,0,c.width,c.height);});
