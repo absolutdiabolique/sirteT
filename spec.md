@@ -67,12 +67,11 @@ The A key rotates 180°. It attempts plain rotation first, then tries a set of b
 
 ## 4. Spin Detection
 
-A **spin** is detected at lock time if both conditions are met:
+A **spin** is detected at lock time if the condition is met:
 
-1. **Last move was a rotation** — `lastMoveWasRotation` is set to `true` by any successful rotation (CW, CCW, or 180°), and cleared to `false` by any translation (left, right, down, gravity, hard drop).
-2. **Piece is immobile** — after locking, the piece cannot move left, right, or down without collision.
+1. **Piece is immobile** — after locking, the piece cannot move left, right, or up without collision.
 
-Upward movement is not tested for immobility since pieces cannot naturally move upward.
+Downward movement is not tested for immobility since pieces is already going to be locked.
 
 ---
 
