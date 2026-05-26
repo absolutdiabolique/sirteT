@@ -189,15 +189,20 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
 /* SPLASH */
 .vs-splash{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) rotate(-12deg);
-  font-family:'Space Mono',monospace;font-size:26px;font-weight:700;
-  color:rgba(0,0,0,0.9);-webkit-text-stroke:2px rgba(255,255,255,0.9);
-  text-align:center;white-space:pre;pointer-events:none;z-index:10;opacity:0;line-height:1.2;
-  text-shadow:0 0 12px rgba(255,255,255,0.4);animation:splashAnim 1.8s ease forwards;}
-@keyframes splashAnim{
-  0%{opacity:0;transform:translate(-50%,-50%) rotate(-12deg) scale(0.7);}
-  15%{opacity:0.85;transform:translate(-50%,-50%) rotate(-12deg) scale(1.08);}
-  30%{opacity:0.7;transform:translate(-50%,-50%) rotate(-12deg) scale(1);}
-  75%{opacity:0.7;}100%{opacity:0;}}
+  font-family:'Space Mono',monospace;font-size:80px;font-weight:700;
+  color:#000;-webkit-text-stroke:2px #fff;
+  text-align:center;white-space:pre;pointer-events:none;z-index:10;line-height:1.2;
+  animation:splashFade 1.8s ease forwards,splashInvert 50ms steps(2,end) infinite;}
+.splash-char{display:inline-block;opacity:0;animation:splashCharPop 0.18s ease forwards;}
+@keyframes splashFade{
+  0%{opacity:1;}75%{opacity:1;}100%{opacity:0;}}
+@keyframes splashCharPop{
+  0%{opacity:0;transform:scale(0.4);}
+  60%{opacity:1;transform:scale(1.15);}
+  100%{opacity:1;transform:scale(1);}}
+@keyframes splashInvert{
+  0%,100%{filter:invert(0);}
+  50%{filter:invert(1);}}
 
 /* Firebase status */
 .mode-card{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 10px;cursor:pointer;text-align:left;transition:border-color 0.15s,background 0.15s;color:var(--text);}
@@ -239,37 +244,46 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
 <!-- STATS -->
 <div id="screen-stats" class="screen">
-  <div class="setup-top" style="margin-bottom:20px;max-width:820px;">
+  <div class="setup-top" style="margin-bottom:20px;max-width:640px;">
     <button class="back-btn" onclick="showScreen('screen-menu')">← Back</button>
     <span class="screen-title">Statistics</span>
     <button class="back-btn" onclick="clearStats()" style="color:var(--danger);border-color:var(--danger);">Clear</button>
   </div>
-  <div class="stats-grid" id="stats-grid" style="max-width:820px;"></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%;max-width:820px;margin-top:20px;">
-    <div class="pb-history">
-      <div class="pb-history-title">Sprint Records</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px;" id="sprint-tabs">
-        <button class="sub-btn active" onclick="showSprintTab('20')">20L</button>
-        <button class="sub-btn" onclick="showSprintTab('40')">40L</button>
-        <button class="sub-btn" onclick="showSprintTab('100')">100L</button>
-      </div>
-      <table class="pb-table">
-        <thead><tr><th>#</th><th>Time</th><th>Date</th></tr></thead>
-        <tbody id="sprint-history"></tbody>
-      </table>
-    </div>
-    <div class="pb-history">
-      <div class="pb-history-title">Blitz Records</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px;" id="blitz-tabs">
-        <button class="sub-btn active" onclick="showBlitzTab('30s')">30s</button>
-        <button class="sub-btn" onclick="showBlitzTab('1m')">1m</button>
-        <button class="sub-btn" onclick="showBlitzTab('2m')">2m</button>
-      </div>
-      <table class="pb-table">
-        <thead><tr><th>#</th><th>Lines Sent</th><th>Date</th></tr></thead>
-        <tbody id="blitz-history"></tbody>
-      </table>
-    </div>
+  <div style="width:100%;max-width:640px;">
+    <div class="pb-history-title" style="margin-bottom:8px;">Sprint</div>
+    <table class="pb-table" id="sprint-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th style="width:33%;">20L</th>
+          <th style="width:33%;">40L</th>
+          <th style="width:33%;">100L</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="sprint-best-row">
+          <td id="sprint-best-20">—</td>
+          <td id="sprint-best-40">—</td>
+          <td id="sprint-best-100">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="pb-history-title" style="margin-bottom:8px;margin-top:28px;">Blitz</div>
+    <table class="pb-table" id="blitz-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th style="width:33%;">30s</th>
+          <th style="width:33%;">1m</th>
+          <th style="width:33%;">2m</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="blitz-best-row">
+          <td id="blitz-best-30s">—</td>
+          <td id="blitz-best-1m">—</td>
+          <td id="blitz-best-2m">—</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -465,7 +479,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div id="right-col">
       <div class="panel">
         <div class="panel-title">Stats</div>
-        <div class="stat-row"><span class="stat-label">Score</span><span class="stat-val" id="score">0</span></div>
+        <div class="stat-row"><span class="stat-label" id="score-label">Score</span><span class="stat-val" id="score">0</span></div>
         <div class="stat-row"><span class="stat-label">Lines</span><span class="stat-val" id="lines">0</span></div>
         <div class="stat-row"><span class="stat-label">Level</span><span class="stat-val" id="level">1</span></div>
         <div class="stat-row" id="sprint-target-row" style="display:none;">
@@ -884,58 +898,45 @@ function buildPieceColorPickers() {
 function loadStats()  { try { return JSON.parse(localStorage.getItem('sirtet_stats')||'{}'); } catch(e) { return {}; } }
 function saveStats(s) { localStorage.setItem('sirtet_stats', JSON.stringify(s)); }
 
-// subKey: '20','40','100' for sprint; '30s','1m','2m' for blitz
+// Only store best (single record per sub-mode)
 function recordSprintTime(ms, subKey) {
   const s = loadStats();
   const key = 'sprint_' + subKey;
-  if (!s[key]) s[key] = [];
-  s[key].push({ ms, date: new Date().toISOString() });
-  s[key].sort((a,b) => a.ms - b.ms);
-  if (s[key].length > 20) s[key] = s[key].slice(0,20);
-  saveStats(s);
+  if (!s[key] || ms < s[key].ms) {
+    s[key] = { ms, date: new Date().toISOString() };
+    saveStats(s);
+  }
 }
 function recordBlitzScore(lines, subKey) {
   const s = loadStats();
   const key = 'blitz_' + subKey;
-  if (!s[key]) s[key] = [];
-  s[key].push({ lines, date: new Date().toISOString() });
-  s[key].sort((a,b) => b.lines - a.lines); // highest first
-  if (s[key].length > 20) s[key] = s[key].slice(0,20);
-  saveStats(s);
+  if (!s[key] || lines > s[key].lines) {
+    s[key] = { lines, date: new Date().toISOString() };
+    saveStats(s);
+  }
 }
 
-let statsSprintTab = '40', statsBlitzTab = '30s';
-window.showSprintTab = function(t) {
-  statsSprintTab = t;
-  document.querySelectorAll('#sprint-tabs .sub-btn').forEach(b => b.classList.toggle('active', b.textContent.replace('L','')===t));
-  renderSprintHistory();
-};
-window.showBlitzTab = function(t) {
-  statsBlitzTab = t;
-  document.querySelectorAll('#blitz-tabs .sub-btn').forEach(b => b.classList.toggle('active', b.textContent===t));
-  renderBlitzHistory();
-};
 function renderSprintHistory() {
   const s = loadStats();
-  const times = (s['sprint_' + statsSprintTab] || []);
-  document.getElementById('sprint-history').innerHTML = !times.length
-    ? '<tr><td colspan="3" style="color:var(--muted);padding:10px 8px;">No records yet</td></tr>'
-    : times.slice(0,10).map((t,i) => `<tr>
-        <td class="${i===0?'gold':''}">${i===0?'🥇':i+1}</td>
-        <td class="${i===0?'gold':''}" style="font-family:'Space Mono',monospace;">${fmtTime(t.ms)}</td>
-        <td style="color:var(--muted);font-size:11px;">${new Date(t.date).toLocaleDateString()}</td>
-      </tr>`).join('');
+  ['20','40','100'].forEach(sub => {
+    const el = document.getElementById('sprint-best-' + sub);
+    if (!el) return;
+    const rec = s['sprint_' + sub];
+    el.textContent = rec ? fmtTime(rec.ms) : '—';
+    el.style.fontFamily = rec ? "'Space Mono', monospace" : '';
+    el.style.color = rec ? 'var(--accent2)' : 'var(--muted)';
+  });
 }
 function renderBlitzHistory() {
   const s = loadStats();
-  const scores = (s['blitz_' + statsBlitzTab] || []);
-  document.getElementById('blitz-history').innerHTML = !scores.length
-    ? '<tr><td colspan="3" style="color:var(--muted);padding:10px 8px;">No records yet</td></tr>'
-    : scores.slice(0,10).map((t,i) => `<tr>
-        <td class="${i===0?'gold':''}">${i===0?'🥇':i+1}</td>
-        <td class="${i===0?'gold':''}" style="font-family:'Space Mono',monospace;">${t.lines} lines</td>
-        <td style="color:var(--muted);font-size:11px;">${new Date(t.date).toLocaleDateString()}</td>
-      </tr>`).join('');
+  ['30s','1m','2m'].forEach(sub => {
+    const el = document.getElementById('blitz-best-' + sub);
+    if (!el) return;
+    const rec = s['blitz_' + sub];
+    el.textContent = rec ? rec.lines + ' lines' : '—';
+    el.style.fontFamily = rec ? "'Space Mono', monospace" : '';
+    el.style.color = rec ? 'var(--accent2)' : 'var(--muted)';
+  });
 }
 function fmtTime(ms) {
   if (ms == null) return '--';
@@ -943,18 +944,6 @@ function fmtTime(ms) {
   return `${m}:${String(sec).padStart(2,'0')}.${String(msec).padStart(3,'0')}`;
 }
 function renderStats() {
-  const s = loadStats();
-  const best40 = s.sprint_40 && s.sprint_40[0];
-  const bestBlitz2m = s.blitz_2m && s.blitz_2m[0];
-  document.getElementById('stats-grid').innerHTML = `
-    <div class="stat-card"><div class="stat-card-label">Best 40L Sprint</div>
-      <div class="stat-card-val accent">${best40 ? fmtTime(best40.ms) : '--'}</div></div>
-    <div class="stat-card"><div class="stat-card-label">Best 2m Blitz</div>
-      <div class="stat-card-val accent">${bestBlitz2m ? bestBlitz2m.lines+' lines' : '--'}</div></div>
-    <div class="stat-card"><div class="stat-card-label">Games Played</div>
-      <div class="stat-card-val">${s.gamesPlayed||0}</div></div>
-    <div class="stat-card"><div class="stat-card-label">Total Lines</div>
-      <div class="stat-card-val">${s.totalLines||0}</div></div>`;
   renderSprintHistory();
   renderBlitzHistory();
 }
@@ -1251,74 +1240,107 @@ function tryRotate180() {
 
 function doLock() {
   saveUndo();
+  const willSpin = isSpin(); // check BEFORE placing — only other filled cells count
   for (let r=0;r<piece.shape.length;r++) for (let c=0;c<piece.shape[r].length;c++) {
     if (!piece.shape[r][c]) continue;
     const row=piece.y+r, col=piece.x+c;
     if (row<0) { if(cfg.mode!=='zen') triggerGameOver(); return; }
     grid[row][col] = cfg.invisibleLocked ? '__inv__' : pieceColors[piece.key];
   }
-  clearLines(); spawnNext(); holdUsed=false;
+  clearLines(willSpin); spawnNext(); holdUsed=false;
 }
 // ── Attack system ────────────────────────────────────────────
-let b2bCount = 0; // back-to-back counter (consecutive quads/T-spins)
-let comboCount = 0; // consecutive clears
+// Tracking
+let b2bCount   = 0;   // consecutive B2B-eligible clears
+let comboCount = 0;   // consecutive clears (resets on 0-clear)
+// True if piece cannot move left, right, or up — using collide() which checks walls + filled cells.
+function isImmobile() {
+  return collide(piece.shape, piece.x - 1, piece.y,     grid) &&
+         collide(piece.shape, piece.x + 1, piece.y,     grid) &&
+         collide(piece.shape, piece.x,     piece.y - 1, grid);
+}
 
-function calcB2BBonus(base) {
-  // B2B bonus: extra lines on top of base attack
-  if (b2bCount <= 0)  return 0;
-  if (b2bCount <= 2)  return 0;
-  if (b2bCount <= 5)  return 1;
-  if (b2bCount <= 10) return 2;
-  if (b2bCount <= 20) return 3;
-  if (b2bCount <= 50) return 4;
-  if (b2bCount <= 100)return 5;
+// Spin detection: piece is immobile (cannot move left, right, or up).
+function isSpin() {
+  return isImmobile();
+}
+
+// Base attack table (lines sent)
+// spin = last move was a rotation + piece immobile after locking
+function baseAttack(cleared, spin) {
+  if (spin) return [0, 2, 4, 7][Math.min(cleared, 3)];
+  return        [0, 0, 1, 2, 4][Math.min(cleared, 4)];
+}
+
+function b2bBonus(b2b) {
+  if (b2b <= 2)   return 0;
+  if (b2b <= 5)   return 1;
+  if (b2b <= 10)  return 2;
+  if (b2b <= 20)  return 3;
+  if (b2b <= 50)  return 4;
+  if (b2b <= 100) return 5;
   return 6;
 }
 
-function calcComboAttack(base, combo) {
-  // ceil(0.00001 + base*(1 + 0.2*combo - 0.01))
+function comboBonus(base, combo) {
+  // ceil(0.00001 + base * (1 + 0.2*combo - 0.01))
+  if (base === 0) return 0;
   return Math.ceil(0.00001 + base * (1 + 0.2*combo - 0.01));
 }
 
-function calcAttack(cleared, isPerfect) {
-  if (isPerfect) return 8;
-  const base = [0, 0, 1, 2, 4][cleared] || 0;
-  if (base === 0) return 0;
-  const isSpecial = cleared >= 4; // quad counts as B2B eligible
-  const b2bBonus = isSpecial ? calcB2BBonus(base) : 0;
-  const withB2B = base + b2bBonus;
-  if (comboCount > 0) return calcComboAttack(withB2B, comboCount);
-  return withB2B;
+
+function calcAndApplyAttack(cleared) {
+  // Perfect/colored clear override (checked AFTER lines are removed)
+  const boardEmpty     = grid.every(row => row.every(c => !c));
+  const isPerfectClear = boardEmpty; // all lines including garbage gone
+  const isColoredClear = false;      // colored clear only if NO garbage was present
+  // (we set these properly in clearLines after we know hadGarbage)
+  return { boardEmpty };
 }
 
-function updateB2BCombo(cleared, isPerfect) {
-  const isSpecial = isPerfect || cleared >= 4;
-  if (cleared > 0) {
-    comboCount++;
-    if (isSpecial) b2bCount++;
-    else b2bCount = 0;
-  } else {
-    comboCount = 0;
-    // b2bCount persists until a non-special clear
-  }
-}
-
-function clearLines() {
+function clearLines(spin) {
   let cleared = 0;
-  for (let r=ROWS-1; r>=0; r--) {
-    if (grid[r].every(c=>c)) { grid.splice(r,1); grid.unshift(Array(COLS).fill(null)); cleared++; r++; }
+  let hadGarbage = false;
+  for (let r = ROWS-1; r >= 0; r--) {
+    if (grid[r].every(c => c)) {
+      if (grid[r].some(c => c === '#888899')) hadGarbage = true;
+      grid.splice(r, 1); grid.unshift(Array(COLS).fill(null)); cleared++; r++;
+    }
   }
   if (cleared === 0) { comboCount = 0; return; }
 
-  const isPerfect = grid.every(row => row.every(c=>!c));
-  const attack = calcAttack(cleared, isPerfect);
-  updateB2BCombo(cleared, isPerfect);
+  const boardEmpty     = grid.every(row => row.every(c => !c));
+  // Perfect clear: board empty, NO garbage was in cleared rows (pure colored blocks)
+  // Colored clear: board empty, but cleared rows had garbage underneath
+  const isPerfectClear = boardEmpty && !hadGarbage;  // 10 lines
+  const isColoredClear = boardEmpty && hadGarbage;   // 5 lines
 
-  // Scoring — blitz uses attack (garbage lines sent), others use point formula
-  if (cfg.mode === 'blitz') {
-    score += attack; // score = total lines sent
+  // B2B eligibility: quad (cleared>=4) or spin with cleared>0
+  const isB2BEligible = cleared >= 4 || spin;
+
+  // Compute attack
+  let attack = 0;
+  if (isPerfectClear) {
+    attack = 10;
+  } else if (isColoredClear) {
+    attack = 5;
   } else {
-    score += [0,100,300,500,800][cleared] * level;
+    const base = baseAttack(cleared, spin);
+    const b2b  = isB2BEligible ? b2bBonus(b2bCount) : 0;
+    const withB2B = base + b2b;
+    attack = comboCount > 0 ? comboBonus(withB2B, comboCount) : withB2B;
+  }
+
+  // Update B2B and combo counters
+  if (isB2BEligible || isPerfectClear || isColoredClear) b2bCount++;
+  else b2bCount = 0;
+  comboCount++;
+
+  // Score
+  if (cfg.mode === 'blitz') {
+    score += attack;
+  } else {
+    score += [0,100,300,500,800][Math.min(cleared,4)] * level;
   }
   lines += cleared;
   level = Math.floor(lines/10)+1;
@@ -1326,12 +1348,16 @@ function clearLines() {
   document.getElementById('lines').textContent  = lines;
   document.getElementById('level').textContent  = level;
 
+  // Splash
+  showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, spin);
+
   if (cfg.mode === 'sprint') {
     const goal = parseInt(cfg.subMode) || 40;
     document.getElementById('sprint-left').textContent = Math.max(0, goal-lines);
     if (lines >= goal) completeSprint();
   }
 }
+
 function completeSprint() {
   const elapsed = performance.now() - sprintStartMs;
   timerRunning = false; running = false;
@@ -1358,7 +1384,8 @@ function doHold() {
 }
 function hardDrop() {
   saveUndo(); cancelLock();
-  score+=2*(ghostY()-piece.y); piece.y=ghostY(); doLock();
+  if (cfg.mode !== 'blitz') score+=2*(ghostY()-piece.y);
+  piece.y=ghostY(); doLock();
 }
 
 function darken(hex) {
@@ -1453,6 +1480,8 @@ function startGame() {
   soloEnsureQueue(); spawnNext(); buildPreviews(); drawHold();
   running=true; paused=false;
   document.getElementById('overlay').style.display='none';
+  const scoreLbl = document.getElementById('score-label');
+  if (scoreLbl) scoreLbl.textContent = cfg.mode==='blitz' ? 'Lines Sent' : 'Score';
   cancelAnimationFrame(rafId); lastTime=performance.now();
   timerRunning=true;
   if(timerInterval) clearInterval(timerInterval);
@@ -1507,6 +1536,7 @@ function stopDAS(){dasHeld=false;clearTimeout(dasTimer);clearInterval(dasInterva
 function startSoftDrop() {
   if(sdActive) return; sdActive=true;
   if(cfg.sdf===41){const gy=ghostY();piece.y=gy;onMove();sdActive=false;return;}
+  if(!collide(piece.shape,piece.x,piece.y+1,grid)){piece.y++;onMove();}
   sdInterval=setInterval(()=>{
     if(!running||paused){stopSD();return;}
     if(!collide(piece.shape,piece.x,piece.y+1,grid)){piece.y++;onMove();}
@@ -1782,7 +1812,7 @@ function vsClearLines(){
     document.getElementById('vs-lines').textContent=vsLines;
     const isPerfect=vsGrid.every(row=>row.every(c=>!c));
     let garbage;
-    if(isPerfect){ garbage=8; showVsSplash('PERFECT\nCLEAR',8); }
+    if(isPerfect){ garbage=10; showVsSplash('PERFECT\nCLEAR',10); }
     else{ garbage=cleared>=4?4:cleared>=3?2:cleared>=2?1:0;
       if(garbage>0) showVsSplash(cleared>=4?'QUAD':cleared>=3?'TRIPLE':'+'+garbage+' LINE'+(cleared>1?'S':''),garbage);}
     if(garbage>0) sendGarbage(garbage);
@@ -1792,13 +1822,49 @@ function addGarbage(g,n){
   const col=Math.floor(Math.random()*COLS);
   for(let i=0;i<n;i++){g.shift();const row=Array(COLS).fill('#444455');row[col]=null;g.push(row);}
 }
+function splashHTML(text) {
+  let digitIdx = 0;
+  return Array.from(text).map(ch => {
+    let delay = 0;
+    if (/\d/.test(ch)) { delay = digitIdx * 100; digitIdx++; }
+    return `<span class="splash-char" style="animation-delay:${delay}ms">${ch}</span>`;
+  }).join('');
+}
+
+function showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, spin) {
+  if (attack === 0 && !isPerfectClear && !isColoredClear) return; // nothing to show
+  const boardWrap = document.getElementById('board-wrap');
+  if (!boardWrap) return;
+
+  // Stacking: if an existing splash is still visible and within 1000ms, add to it
+  const existing = boardWrap.querySelector('.vs-splash');
+  const now = Date.now();
+  if (existing && existing._splashTime && (now - existing._splashTime) < 1000) {
+    existing._splashTotal = (existing._splashTotal || 0) + attack;
+    existing._splashTime = now;
+    clearTimeout(existing._splashTimeout);
+    existing.innerHTML = splashHTML('+' + existing._splashTotal);
+    existing._splashTimeout = setTimeout(() => existing.remove(), 1800);
+    return;
+  }
+  if (existing) existing.remove();
+
+  if (attack === 0) return; // perfect/colored clear with 0 attack (shouldn't happen but guard)
+
+  const el = document.createElement('div');
+  el.className = 'vs-splash';
+  el.innerHTML = splashHTML('+' + attack);
+  el._splashTotal = attack;
+  el._splashTime = now;
+  boardWrap.style.position = 'relative';
+  boardWrap.appendChild(el);
+  el._splashTimeout = setTimeout(() => el.remove(), 1800);
+}
+
 function showVsSplash(text,n){
   const old=document.getElementById('vs-my-board-wrap').querySelector('.vs-splash');
   if(old)old.remove();
-  const el=document.createElement('div'); el.className='vs-splash'; el.textContent=text;
-  if(n>=8)el.style.color='rgba(255,215,0,0.9)';
-  else if(n>=4)el.style.color='rgba(100,200,255,0.9)';
-  else if(n>=2)el.style.color='rgba(180,120,255,0.9)';
+  const el=document.createElement('div'); el.className='vs-splash'; el.innerHTML=splashHTML(text);
   document.getElementById('vs-my-board-wrap').appendChild(el);
   setTimeout(()=>el.remove(),1800);
 }
@@ -1938,6 +2004,7 @@ function vsStopDAS(){vsDasHeld=false;clearTimeout(vsDasTimer);clearInterval(vsDa
 function vsStartSD(){
   if(vsSDActive)return;vsSDActive=true;
   if(cfg.sdf===41){const gy=vsGhostY();vsPiece.y=gy;vsOnMove();vsSDActive=false;return;}
+  if(!collide(vsPiece.shape,vsPiece.x,vsPiece.y+1,vsGrid)){vsPiece.y++;vsOnMove();}
   vsSDInterval=setInterval(()=>{
     if(!vsRunLoop){vsStopSD();return;}
     if(!collide(vsPiece.shape,vsPiece.x,vsPiece.y+1,vsGrid)){vsPiece.y++;vsOnMove();}
