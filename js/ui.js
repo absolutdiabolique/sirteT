@@ -61,6 +61,42 @@ export function showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, 
   el._splashTimeout = setTimeout(() => el.remove(), 1800);
 }
 
+export function updateCounters(wrapId, comboCount, b2bCount) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const comboEl = wrap.querySelector('.combo-display');
+  const b2bEl   = wrap.querySelector('.b2b-display');
+  if (comboEl) {
+    comboEl.textContent = comboCount > 0 ? `${comboCount} COMBO` : '';
+    comboEl.classList.toggle('active', comboCount > 0);
+  }
+  if (b2bEl) {
+    b2bEl.textContent = b2bCount > 0 ? `B2B ${b2bCount}` : '';
+    b2bEl.classList.toggle('active', b2bCount > 0);
+  }
+}
+
+export function showSplash(wrapId, label, pieceKey, spin, side='left') {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.querySelectorAll('.clear-splash,.spin-splash').forEach(el => el.remove());
+  if (label) {
+    const el = document.createElement('div');
+    el.className = `clear-splash side-${side}`;
+    el.textContent = label;
+    wrap.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+  if (spin && pieceKey) {
+    const spinEl = document.createElement('div');
+    spinEl.className = `spin-splash side-${side}`;
+    spinEl.textContent = `${pieceKey}-SPIN`;
+    spinEl.style.color = pieceColors[pieceKey];
+    wrap.appendChild(spinEl);
+    spinEl.addEventListener('animationend', () => spinEl.remove());
+  }
+}
+
 export function showVsSplash(text, n) {
   const old=document.getElementById('vs-my-board-wrap').querySelector('.vs-splash');
   if(old)old.remove();

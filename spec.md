@@ -140,7 +140,7 @@ Consecutive **B2B-eligible** clears (quads or spins) without a non-eligible clea
 ### Combo
 When clearing lines on consecutive pieces (no zero-clear in between), a combo multiplier applies:
 ```
-attack = ceil(0.00001 + base × (1 + 0.2×combo − 0.01))
+attack = floor(base × (1 + 0.2×combo))
 ```
 where `base` is attack after B2B bonus and `combo` is the consecutive clear count. This formula ensures singles contribute to combo attack without inflating doubles/triples/quads excessively.
 

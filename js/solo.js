@@ -1,7 +1,7 @@
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
-import { fmtTime, showToast, showSoloSplash, drawMini, darken } from './ui.js';
+import { fmtTime, showToast, showSoloSplash, showSplash, updateCounters, drawMini, darken } from './ui.js';
 import { loadStats, saveStats, recordSprintTime, recordBlitzScore } from './stats.js';
 
 // Canvas setup
@@ -131,7 +131,7 @@ function isSpin() { return isImmobile(); }
 
 function baseAttack(cleared, spin) {
   if (spin) return [0, 2, 4, 7][Math.min(cleared, 3)];
-  return        [0, 0, 1, 2, 4][Math.min(cleared, 4)];
+  return        [0, 0.5, 1, 2, 4][Math.min(cleared, 4)];
 }
 function b2bBonus(b2b) {
   if (b2b <= 2)   return 0;
@@ -142,12 +142,8 @@ function b2bBonus(b2b) {
   if (b2b <= 100) return 5;
   return 6;
 }
-function comboBonus(base, combo) {
-  if (base === 0) return 0;
-  return Math.ceil(0.00001 + base * (1 + 0.2*combo - 0.01));
-}
 
-function clearLines(spin) {
+function clearLines(spin, pieceKey) {
   let cleared = 0;
   let hadGarbage = false;
   for (let r = ROWS-1; r >= 0; r--) {
@@ -156,28 +152,33 @@ function clearLines(spin) {
       grid.splice(r, 1); grid.unshift(Array(COLS).fill(null)); cleared++; r++;
     }
   }
-  if (cleared === 0) { comboCount = 0; return; }
+  if (cleared === 0) {
+    comboCount = 0;
+    if (spin) showSplash('board-wrap', '', pieceKey, true, 'left');
+    updateCounters('board-wrap', 0, b2bCount);
+    return;
+  }
 
   const boardEmpty     = grid.every(row => row.every(c => !c));
   const isPerfectClear = boardEmpty && !hadGarbage;
   const isColoredClear = boardEmpty && hadGarbage;
   const isB2BEligible  = cleared >= 4 || spin;
 
-  let attack = 0;
+  let rawBase = 0;
   if (isPerfectClear) {
-    attack = 10;
+    rawBase = 10;
   } else if (isColoredClear) {
-    attack = 5;
+    rawBase = 5;
   } else {
-    const base = baseAttack(cleared, spin);
-    const b2b  = isB2BEligible ? b2bBonus(b2bCount) : 0;
-    const withB2B = base + b2b;
-    attack = comboCount > 0 ? comboBonus(withB2B, comboCount) : withB2B;
+    const b2b = isB2BEligible ? b2bBonus(b2bCount) : 0;
+    rawBase = baseAttack(cleared, spin) + b2b;
   }
+  const attack = Math.floor(rawBase * (1 + 0.2 * comboCount));
 
   if (isB2BEligible || isPerfectClear || isColoredClear) b2bCount++;
   else b2bCount = 0;
   comboCount++;
+  updateCounters('board-wrap', comboCount, b2bCount);
 
   if (cfg.mode === 'blitz') {
     score += attack;
@@ -191,6 +192,11 @@ function clearLines(spin) {
   document.getElementById('level').textContent  = level;
 
   showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, spin);
+
+  const clearLabel = isPerfectClear ? 'PERFECT CLEAR'
+    : isColoredClear ? 'COLORED CLEAR'
+    : ['','SINGLE','DOUBLE','TRIPLE','QUAD'][Math.min(cleared,4)];
+  showSplash('board-wrap', clearLabel, pieceKey, spin, 'left');
 
   if (cfg.mode === 'sprint') {
     const goal = parseInt(cfg.subMode) || 40;
@@ -235,13 +241,14 @@ export function hardDrop() {
 function doLock() {
   saveUndo();
   const willSpin = isSpin();
+  const lockedKey = piece.key;
   for (let r=0;r<piece.shape.length;r++) for (let c=0;c<piece.shape[r].length;c++) {
     if (!piece.shape[r][c]) continue;
     const row=piece.y+r, col=piece.x+c;
     if (row<0) { if(cfg.mode!=='zen') triggerGameOver(); return; }
     grid[row][col] = cfg.invisibleLocked ? '__inv__' : pieceColors[piece.key];
   }
-  clearLines(willSpin); spawnNext(); holdUsed=false;
+  clearLines(willSpin, lockedKey); spawnNext(); holdUsed=false;
 }
 
 // ── Drawing ───────────────────────────────────────────────────
@@ -312,6 +319,7 @@ function loop(ts) {
 // ── Start / game over ─────────────────────────────────────────
 export function startGame() {
   grid=mkGrid(); score=0; lines=0; level=1; dropAcc=0; b2bCount=0; comboCount=0;
+  updateCounters('board-wrap', 0, 0);
   soloBag=[]; soloQueue=[]; heldKey=null; holdUsed=false;
   undoStack=[]; redoStack=[]; cancelLock();
   ['score','lines','level'].forEach(id=>document.getElementById(id).textContent=id==='level'?'1':'0');

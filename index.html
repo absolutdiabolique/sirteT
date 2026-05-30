@@ -117,17 +117,18 @@ input[type=color]{width:32px;height:24px;border:1px solid var(--border2);border-
 .game-mode-badge{font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:2px 8px;letter-spacing:0.1em;}
 .practice-badge{font-size:9px;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:2px 6px;}
 .game-timer{font-family:'Space Mono',monospace;font-size:18px;margin-left:auto;}
-#game-main{display:flex;gap:12px;align-items:flex-start;}
-#left-col,#right-col{display:flex;flex-direction:column;gap:8px;}
-#right-col{min-width:108px;max-width:128px;}
+#game-main{display:flex;gap:8px;align-items:flex-start;}
+#left-buttons{display:flex;flex-direction:column;gap:8px;}
+#hold-col{display:flex;flex-direction:column;gap:8px;}
+#right-col{display:flex;flex-direction:column;gap:8px;min-width:110px;max-width:140px;}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;}
 .panel-title{font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;font-family:'Space Mono',monospace;}
 .stat-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;}
 .stat-label{font-size:10px;color:var(--muted);}
 .stat-val{font-size:16px;font-family:'Space Mono',monospace;}
 .mini-canvas{display:block;}
-#hold-panel{width:80px;}
-.preview-stack{display:flex;flex-direction:column;gap:4px;}
+#hold-panel{width:112px;}
+.preview-stack{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
 #board-wrap{position:relative;}
 canvas#board{display:block;border:1px solid var(--border2);image-rendering:pixelated;}
 #overlay{position:absolute;inset:0;background:rgba(10,10,12,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;}
@@ -203,6 +204,27 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 @keyframes splashInvert{
   0%,100%{filter:invert(0);}
   50%{filter:invert(1);}}
+
+/* Line-clear side splash */
+@keyframes clearSplash{0%{opacity:1;letter-spacing:0.02em;}100%{opacity:0;letter-spacing:0.65em;}}
+.clear-splash,.spin-splash{
+  position:absolute;pointer-events:none;z-index:10;
+  font-family:'Space Mono',monospace;font-weight:400;white-space:nowrap;
+  animation:clearSplash 1s ease-out forwards;}
+.clear-splash{top:38%;font-size:13px;color:#fff;text-transform:uppercase;}
+.spin-splash{top:calc(38% + 24px);font-size:10px;text-transform:uppercase;}
+.clear-splash.side-left,.spin-splash.side-left{right:calc(100% + 10px);text-align:right;}
+.clear-splash.side-right,.spin-splash.side-right{left:calc(100% + 10px);text-align:left;}
+.combo-display,.b2b-display{
+  position:absolute;pointer-events:none;z-index:10;
+  font-family:'Space Mono',monospace;font-weight:400;
+  white-space:nowrap;font-size:11px;text-transform:uppercase;
+  opacity:0;transition:opacity 0.5s ease-out;}
+.combo-display.active,.b2b-display.active{opacity:1;transition:opacity 0s;}
+.combo-display{top:30%;color:#fff;}
+.b2b-display{top:22%;color:var(--warn);}
+.combo-display.side-left,.b2b-display.side-left{right:calc(100% + 10px);text-align:right;}
+.combo-display.side-right,.b2b-display.side-right{left:calc(100% + 10px);text-align:left;}
 
 /* Firebase status */
 .mode-card{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 10px;cursor:pointer;text-align:left;transition:border-color 0.15s,background 0.15s;color:var(--text);}
@@ -460,21 +482,25 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <span id="game-timer" class="game-timer">0:00.000</span>
   </div>
   <div id="game-main">
-    <div id="left-col">
-      <div class="panel" id="hold-panel" style="width:80px;">
-        <div class="hold-label">Hold</div>
-        <canvas id="hold-canvas" class="mini-canvas" width="72" height="56"></canvas>
-      </div>
+    <div id="left-buttons">
       <button id="gear-btn">⚙</button>
       <button class="btn" id="pause-btn">Pause</button>
       <button class="btn" onclick="showScreen('screen-menu')" style="font-size:10px;color:var(--muted);">Menu</button>
     </div>
+    <div id="hold-col">
+      <div class="panel" id="hold-panel">
+        <div class="hold-label">Hold</div>
+        <canvas id="hold-canvas" class="mini-canvas" width="96" height="76"></canvas>
+      </div>
+    </div>
     <div id="board-wrap">
-      <canvas id="board" width="200" height="400"></canvas>
+      <canvas id="board" width="280" height="560"></canvas>
       <div id="overlay">
         <h2>sirte<span class="hi">T</span></h2>
         <div class="sub">press hard drop to start</div>
       </div>
+      <div class="b2b-display side-left"></div>
+      <div class="combo-display side-left"></div>
     </div>
     <div id="right-col">
       <div class="panel">
@@ -546,7 +572,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div style="display:flex;flex-direction:column;gap:4px;padding-top:28px;">
       <div class="panel" style="padding:8px;">
         <div class="panel-title" style="color:var(--accent);">My Next</div>
-        <div id="vs-preview-stack"></div>
+        <div id="vs-preview-stack" class="preview-stack"></div>
       </div>
     </div>
     <!-- My board -->
@@ -554,20 +580,23 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
       <div class="vs-player-label me" id="vs-my-label">You</div>
       <div style="display:flex;gap:4px;align-items:flex-start;">
         <div style="display:flex;flex-direction:column;gap:6px;padding-top:4px;">
-          <div class="panel" style="padding:8px;width:68px;">
+          <div class="panel" style="padding:8px;width:88px;">
             <div class="hold-label">Hold</div>
-            <canvas id="vs-hold-canvas" width="60" height="46"></canvas>
+            <canvas id="vs-hold-canvas" width="76" height="60"></canvas>
           </div>
         </div>
         <div class="vs-board-wrap" id="vs-my-board-wrap">
-          <canvas id="vs-my-board" class="vs-board" width="240" height="480"></canvas>
+          <canvas id="vs-my-board" class="vs-board" width="280" height="560"></canvas>
           <div id="vs-overlay" style="display:none;">
             <h2 id="vs-overlay-title" style="font-family:'Space Mono',monospace;font-size:14px;">–</h2>
             <div class="sub" id="vs-overlay-sub"></div>
+            <button id="vs-rematch-btn" class="big-btn primary" style="display:none;margin-top:10px;" onclick="vsRematch()">▶ Play Again</button>
           </div>
+          <div class="b2b-display side-left"></div>
+          <div class="combo-display side-left"></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;padding-top:4px;">
-          <div class="garbage-bar" style="height:240px;">
+          <div class="garbage-bar" style="height:280px;">
             <div class="garbage-fill" id="vs-garbage-fill" style="height:0%"></div>
           </div>
         </div>
@@ -579,13 +608,15 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
       </div>
     </div>
     <!-- VS divider -->
-    <div style="display:flex;align-items:center;padding-top:200px;">
+    <div style="display:flex;align-items:center;padding-top:280px;">
       <span style="font-family:'Space Mono',monospace;font-size:18px;color:var(--border2);">VS</span>
     </div>
     <!-- Opp board -->
     <div class="vs-player-col">
       <div class="vs-player-label" id="vs-opp-label">Opponent</div>
-      <canvas id="vs-opp-board" class="vs-board" width="240" height="480"></canvas>
+      <div class="vs-board-wrap" id="vs-opp-board-wrap">
+        <canvas id="vs-opp-board" class="vs-board" width="280" height="560"></canvas>
+      </div>
       <div class="panel" style="padding:8px;margin-top:4px;width:100%;">
         <div class="panel-title">Stats</div>
         <div class="stat-row"><span class="stat-label">Score</span><span class="stat-val" id="vs-opp-score">0</span></div>
@@ -596,7 +627,7 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <div style="display:flex;flex-direction:column;gap:4px;padding-top:28px;">
       <div class="panel" style="padding:8px;">
         <div class="panel-title">Opp Next</div>
-        <div id="vs-opp-preview-stack"></div>
+        <div id="vs-opp-preview-stack" class="preview-stack"></div>
       </div>
       <button class="btn" onclick="leaveRoom()" style="font-size:10px;color:var(--muted);margin-top:4px;">Leave</button>
     </div>

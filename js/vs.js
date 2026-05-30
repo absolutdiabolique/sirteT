@@ -1,7 +1,7 @@
 import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
-import { fmtTime, showToast, showVsSplash, drawMini, darken } from './ui.js';
+import { fmtTime, showToast, showVsSplash, showSplash, updateCounters, drawMini, darken } from './ui.js';
 import { db } from './firebase.js';
 import { ref, set, get, onValue, off, serverTimestamp, remove, update }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -21,12 +21,14 @@ export let vsPiece=null;
 let vsHeldKey, vsHoldUsed, vsQueue=[];
 let vsScore=0, vsLines=0, vsLevel=1, vsDropAcc=0;
 let vsPendingGarbage=0, oppGrid=null, oppNextQueue=[];
+let vsComboCount=0, vsB2bCount=0;
 let vsRafId=null, vsLastTime=0, vsTimerInterval=null;
 let vsLockTimer=null, vsLockFlashTimer=null, vsLockFlashing=false, vsLockBright=true;
 let vsLockMoves=0;
 
 let myPlayerId=null, roomId=null, mySlot=null;
 let roomRef=null, roomListener=null;
+let currentGameId=null;
 
 // Shared sequence for VS bags
 let sharedSeq=[], vsSeqIdx=0;
@@ -93,17 +95,39 @@ function listenRoom() {
     const bothReady=p1&&p2;
     document.getElementById('room-play-btn').style.display=bothReady&&mySlot===1?'block':'none';
     document.getElementById('room-card-sub').textContent=bothReady?'Both players ready!':'Waiting for opponent...';
-    if(data.status==='playing'&&!vsRunning) enterVsGame(data,mySlot===0);
+    const newGameId=data.gameId||null;
+    if(data.status==='playing'){
+      if(!vsRunning){currentGameId=newGameId;enterVsGame(data,mySlot===0);}
+      else if(newGameId&&newGameId!==currentGameId){currentGameId=newGameId;handleRematch(data);}
+    }
     if(vsRunning) updateOppBoard(data);
   });
 }
 
 export async function startVsGame(){
-  await update(ref(db,`rooms/${roomId}`),{status:'playing',startTime:serverTimestamp()});
+  const gameId=genCode();
+  await update(ref(db,`rooms/${roomId}`),{status:'playing',gameId,startTime:serverTimestamp()});
+}
+
+export async function rematchGame(){
+  if(!db||!roomId||!myPlayerId)return;
+  const seed=Date.now()%2147483647;
+  const gameId=genCode();
+  await set(ref(db,`rooms/${roomId}/garbage`),null);
+  await update(ref(db,`rooms/${roomId}`),{bagSeed:seed,gameId,status:'playing',startTime:serverTimestamp()});
+}
+
+function handleRematch(data){
+  vsCancelLock();
+  sharedSeq=buildSharedSeq(data.bagSeed||12345); vsSeqIdx=0;
+  if(db&&roomId&&myPlayerId)
+    update(ref(db,`rooms/${roomId}/players/${myPlayerId}`),{alive:true,score:0,lines:0,board:null,queue:[]});
+  initVsGame();
 }
 
 function enterVsGame(data,spectate=false) {
   vsSpectating=spectate; vsRunning=true;
+  currentGameId=data.gameId||null;
   window.showScreen('screen-vs');
   const players=data.players||{};
   const opp=Object.entries(players).find(([id])=>id!==myPlayerId);
@@ -126,9 +150,12 @@ function initVsGame() {
   vsGrid=mkGrid(); vsPiece=null; vsHeldKey=null; vsHoldUsed=false;
   vsQueue=[]; vsScore=0; vsLines=0; vsLevel=1; vsDropAcc=0;
   vsPendingGarbage=0; oppGrid=mkGrid(); oppNextQueue=[];
+  vsComboCount=0; vsB2bCount=0;
+  updateCounters('vs-my-board-wrap', 0, 0);
   document.getElementById('vs-score').textContent='0';
   document.getElementById('vs-lines').textContent='0';
   document.getElementById('vs-overlay').style.display='none';
+  const _rb=document.getElementById('vs-rematch-btn');if(_rb)_rb.style.display='none';
   vsEnsureQueue(); vsSpawnNext(); buildVsPreviews(); buildOppPreviews();
   vsRunLoop=true; vsLastTime=performance.now();
   cancelAnimationFrame(vsRafId);
@@ -143,7 +170,18 @@ function initVsGame() {
 function vsEnsureQueue(){while(vsQueue.length<5)vsQueue.push(sharedSeq[vsSeqIdx++]);}
 function vsDequeue(){vsEnsureQueue();const k=vsQueue.shift();vsEnsureQueue();return k;}
 
+function vsBaseAttack(cleared,spin){
+  if(spin) return [0,2,4,7][Math.min(cleared,3)];
+  return [0,0.5,1,2,4][Math.min(cleared,4)];
+}
+function vsB2bBonus(b2b){
+  if(b2b<=2)return 0;if(b2b<=5)return 1;if(b2b<=10)return 2;
+  if(b2b<=20)return 3;if(b2b<=50)return 4;if(b2b<=100)return 5;return 6;
+}
+
 function vsIsGrounded(){return vsPiece&&collide(vsPiece.shape,vsPiece.x,vsPiece.y+1,vsGrid);}
+function vsIsImmobile(){return collide(vsPiece.shape,vsPiece.x-1,vsPiece.y,vsGrid)&&collide(vsPiece.shape,vsPiece.x+1,vsPiece.y,vsGrid)&&collide(vsPiece.shape,vsPiece.x,vsPiece.y-1,vsGrid);}
+function vsIsSpin(){return vsIsImmobile();}
 function vsGhostY(){let g=vsPiece.y;while(!collide(vsPiece.shape,vsPiece.x,g+1,vsGrid))g++;return g;}
 
 function vsSchedLock(isReset=false){
@@ -196,31 +234,45 @@ function vsSpawnNext(){
   vsOnMove();
 }
 function vsDoLock(){
+  const willSpin=vsIsSpin();
+  const lockedKey=vsPiece.key;
   for(let r=0;r<vsPiece.shape.length;r++)for(let c=0;c<vsPiece.shape[r].length;c++){
     if(!vsPiece.shape[r][c])continue;
     const row=vsPiece.y+r,col=vsPiece.x+c;
     if(row<0){vsGameOver();return;}
     vsGrid[row][col]=pieceColors[vsPiece.key];
   }
-  vsClearLines(); vsSpawnNext(); vsHoldUsed=false;
+  vsClearLines(willSpin,lockedKey); vsSpawnNext(); vsHoldUsed=false;
   if(vsPendingGarbage>0){addGarbage(vsGrid,vsPendingGarbage);vsPendingGarbage=0;}
   pushBoard();
 }
-function vsClearLines(){
+function vsClearLines(spin,pieceKey){
   let cleared=0;
   for(let r=ROWS-1;r>=0;r--){if(vsGrid[r].every(c=>c)){vsGrid.splice(r,1);vsGrid.unshift(Array(COLS).fill(null));cleared++;r++;}}
-  if(cleared){
-    vsScore+=[0,100,300,500,800][cleared]*vsLevel;
-    vsLines+=cleared; vsLevel=Math.floor(vsLines/10)+1;
-    document.getElementById('vs-score').textContent=vsScore;
-    document.getElementById('vs-lines').textContent=vsLines;
-    const isPerfect=vsGrid.every(row=>row.every(c=>!c));
-    let garbage;
-    if(isPerfect){ garbage=10; showVsSplash('PERFECT\nCLEAR',10); }
-    else{ garbage=cleared>=4?4:cleared>=3?2:cleared>=2?1:0;
-      if(garbage>0) showVsSplash(cleared>=4?'QUAD':cleared>=3?'TRIPLE':'+'+garbage+' LINE'+(cleared>1?'S':''),garbage);}
-    if(garbage>0) sendGarbage(garbage);
+  if(cleared===0){
+    vsComboCount=0;
+    if(spin) showSplash('vs-my-board-wrap','',pieceKey,true,'left');
+    updateCounters('vs-my-board-wrap',0,vsB2bCount);
+    return;
   }
+  vsScore+=[0,100,300,500,800][cleared]*vsLevel;
+  vsLines+=cleared; vsLevel=Math.floor(vsLines/10)+1;
+  document.getElementById('vs-score').textContent=vsScore;
+  document.getElementById('vs-lines').textContent=vsLines;
+  const isPerfect=vsGrid.every(row=>row.every(c=>!c));
+  const isB2BEligible=cleared>=4||spin;
+  let rawBase;
+  if(isPerfect){ rawBase=10; }
+  else{ rawBase=vsBaseAttack(cleared,spin)+(isB2BEligible?vsB2bBonus(vsB2bCount):0); }
+  const garbage=Math.floor(rawBase*(1+0.2*vsComboCount));
+  if(isB2BEligible||isPerfect) vsB2bCount++; else vsB2bCount=0;
+  vsComboCount++;
+  updateCounters('vs-my-board-wrap',vsComboCount,vsB2bCount);
+  if(isPerfect) showVsSplash('PERFECT\nCLEAR',garbage);
+  else if(garbage>0) showVsSplash(cleared>=4?'QUAD':cleared>=3?'TRIPLE':'+'+garbage+' LINE'+(cleared>1?'S':''),garbage);
+  if(garbage>0) sendGarbage(garbage);
+  const vsLabel=isPerfect?'PERFECT CLEAR':['','SINGLE','DOUBLE','TRIPLE','QUAD'][Math.min(cleared,4)];
+  showSplash('vs-my-board-wrap',vsLabel,pieceKey,spin,'left');
 }
 function addGarbage(g,n){
   const col=Math.floor(Math.random()*COLS);
@@ -272,6 +324,7 @@ async function vsGameOver(){
   document.getElementById('vs-overlay').style.display='flex';
   document.getElementById('vs-overlay-title').textContent='GAME OVER';
   document.getElementById('vs-overlay-sub').textContent='Opponent still going...';
+  if(mySlot===1){const btn=document.getElementById('vs-rematch-btn');if(btn)btn.style.display='block';}
 }
 function handleVsWin(){
   if(!vsRunLoop)return;
@@ -279,6 +332,7 @@ function handleVsWin(){
   document.getElementById('vs-overlay').style.display='flex';
   document.getElementById('vs-overlay-title').textContent='YOU WIN!';
   document.getElementById('vs-overlay-sub').textContent='Opponent topped out';
+  if(mySlot===1){const btn=document.getElementById('vs-rematch-btn');if(btn)btn.style.display='block';}
 }
 
 export function stopVsGame(){

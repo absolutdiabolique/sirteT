@@ -1,4 +1,4 @@
-export const COLS = 10, ROWS = 20, SZ = 20, VS_SZ = 24;
+export const COLS = 10, ROWS = 20, SZ = 28, VS_SZ = 28;
 export const PKEYS = ['I','O','T','S','Z','J','L'];
 
 // All 4 rotation states per piece: [state0, stateR, state2, stateL]

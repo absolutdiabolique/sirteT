@@ -10,7 +10,7 @@ import { startGame, togglePause, stopGame, running, paused,
   startDAS, stopDAS, startSoftDrop, stopSD,
   doUndo, doRedo, drawHold, buildPreviews } from './solo.js';
 import { vsRunning, vsRunLoop, vsPiece, stopVsGame, createRoom, joinRoom,
-  startVsGame, leaveRoom, vsStartDAS, vsStopDAS, vsStartSD, vsStopSD,
+  startVsGame, leaveRoom, rematchGame, vsStartDAS, vsStopDAS, vsStartSD, vsStopSD,
   vsTryRotate, vsTryRotate180, vsHardDrop, vsDoHold } from './vs.js';
 
 // Full showScreen with side effects
@@ -37,6 +37,7 @@ window.createRoom    = createRoom;
 window.joinRoom      = joinRoom;
 window.startVsGame   = startVsGame;
 window.leaveRoom     = leaveRoom;
+window.vsRematch     = rematchGame;
 window.clearStats    = () => { if(confirm('Clear all stats?')) { localStorage.removeItem('sirtet_stats'); renderStats(); } };
 window.resetSettings = resetSettings;
 window.selectMode    = selectMode;
