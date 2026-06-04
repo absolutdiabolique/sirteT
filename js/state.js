@@ -28,7 +28,10 @@ export function checkBind(e, action) {
 }
 
 export function saveGlobal() {
-  localStorage.setItem('sirtet_global', JSON.stringify({ das:cfg.das, arr:cfg.arr, sdf:cfg.sdf, keybinds, pieceColors }));
+  localStorage.setItem('sirtet_global', JSON.stringify({
+    das:cfg.das, arr:cfg.arr, sdf:cfg.sdf, keybinds, pieceColors,
+    ghostOpacity:cfg.ghostOpacity, gridOn:cfg.gridOn, gridWidth:cfg.gridWidth, gridColor:cfg.gridColor
+  }));
 }
 
 export function loadGlobal() {
@@ -40,6 +43,10 @@ export function loadGlobal() {
     if (s.sdf !== undefined) cfg.sdf = s.sdf;
     if (s.keybinds)    Object.assign(keybinds, s.keybinds);
     if (s.pieceColors) Object.assign(pieceColors, s.pieceColors);
+    if (s.ghostOpacity !== undefined) cfg.ghostOpacity = s.ghostOpacity;
+    if (s.gridOn      !== undefined) cfg.gridOn      = s.gridOn;
+    if (s.gridWidth   !== undefined) cfg.gridWidth   = s.gridWidth;
+    if (s.gridColor   !== undefined) cfg.gridColor   = s.gridColor;
   } catch(e) {}
 }
 

@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-sirteT is a falling-block puzzle game. Pieces (tetrominoes) fall from the top of a 10×20 grid. Players rotate and position pieces to complete horizontal lines, which are cleared and scored. The game includes solo modes, a 1v1 multiplayer mode, and a settings system.
+sirteT is a falling-block puzzle game. Pieces (tetrominoes) fall from the top of a 10×20 grid. Players rotate and position pieces to complete horizontal lines, which are cleared and scored. The game includes solo modes, a vs-bot mode, a 1v1 multiplayer mode, an account system for cross-device stats, and a settings system.
 
 ---
 
@@ -166,6 +166,12 @@ Maximize garbage lines sent within a time limit. Sub-modes: **30s**, **1m**, **2
 ### Zen
 No gravity increase, no game over, infinite hold. Practice environment.
 
+### vs Bot
+Player competes against a local AI opponent. See section 14.
+
+### 1v1 Multiplayer
+Real-time match against another player over Firebase. See section 15.
+
 ---
 
 ## 9. Ranked Play
@@ -233,7 +239,41 @@ On any line clear that sends attack, a splash number appears over the board:
 
 ---
 
-## 14. Multiplayer (1v1)
+## 14. vs Bot
+
+### Overview
+The player competes against a local AI bot on two side-by-side boards. The match ends when either player tops out.
+
+### Bot AI — Diver Down
+The single available AI is **Diver Down**. It plays optimally using a multi-phase evaluation engine.
+
+### Bot Speed
+Speed is set before the match in the vs Bot setup screen:
+- Range: **0.5–20 PPS** (pieces per second), selectable in 0.25 PPS increments
+- Dragging the slider past 20 enables **MAX** mode — the bot places pieces as fast as the engine can run (uncapped)
+
+### Board Layout
+Both the player board and the bot board use the **same structure**:
+
+```
+[Next preview] [Hold] [Board + splashes] [Garbage bar]
+```
+
+- The **Next preview** panel sits to the left of the board
+- The **Hold** panel sits between the preview and the board
+- **Splash text** (attack numbers, line-clear labels, combo/B2B counters) appears to the left of the board canvas for both sides
+- The **garbage bar** sits to the right of the board canvas
+- The bot's hold piece is rendered and updates live
+
+### Screen Layout
+A narrow **sidebar column** on the far left of the screen replaces the traditional top header. It shows from top to bottom: the mode label ("vs Bot"), the match timer, and the Menu button.
+
+### Attack & Garbage
+Attack and garbage mechanics are identical to 1v1 multiplayer (see section 15). The bot's incoming garbage queue is displayed on its garbage bar.
+
+---
+
+## 15. Multiplayer (1v1)
 
 ### Room System
 - Player 1 creates a room, receives a 6-character room code.
@@ -260,6 +300,21 @@ Packets carry: serialized board (with piece colors), score, lines, alive status,
 ### Board Colors
 The opponent's board is rendered with full piece colors (not just a binary filled/empty representation). Garbage rows are rendered in dark grey (`#444455`).
 
+### Board Layout
+Both the player board and the opponent board use the **same structure**:
+
+```
+[Next preview] [Hold] [Board + splashes] [Garbage bar]
+```
+
+- The **Next preview** panel sits to the left of each board
+- The player's **Hold** panel is shown; opponent hold is not transmitted
+- **Splash text** appears to the left of the board canvas for both sides
+- The **garbage bar** sits to the right of the player's board (incoming garbage)
+
+### Screen Layout
+A narrow **sidebar column** on the far left of the screen replaces the traditional top header. It shows from top to bottom: the mode label ("1v1"), the match timer, and the Leave button.
+
 ### Attack Flow (Outgoing)
 1. A line clear generates an attack value.
 2. The attack is added to **outgoing segments**. If the previous segment was within 1000ms, it merges into it; otherwise a new segment is created.
@@ -276,7 +331,7 @@ The opponent's board is rendered with full piece colors (not just a binary fille
 ### Attack Bar Display
 Each attack bar is a vertical strip next to the board:
 - **My bar** (right of my board): shows what the opponent has sent me (incoming)
-- **Opp bar** (left of opponent's board): shows what I have sent them (outgoing, pending)
+- **Opp bar** (right of opponent's board): shows what the opponent has incoming
 - Each segment is a red rectangle proportional to its line count
 - Segments are separated by thin black dividers
 
@@ -288,7 +343,7 @@ Spectators see both boards updated in real time from Firebase. They cannot inter
 
 ---
 
-## 15. Settings
+## 16. Settings
 
 All settings persist via `localStorage`.
 
@@ -317,7 +372,7 @@ When enabled:
 
 ---
 
-## 16. Stats
+## 17. Stats
 
 Only personal bests are saved (one record per sub-mode).
 
@@ -326,17 +381,59 @@ Only personal bests are saved (one record per sub-mode).
 | Sprint | 20L, 40L, 100L   | Time (ms)  |
 | Blitz  | 30s, 1m, 2m      | Lines sent |
 
-Stats are displayed in a table showing all sub-modes side by side. Clearing stats removes all saved records.
+Stats are displayed in a table showing all sub-modes side by side. Clearing stats removes all locally saved records.
+
+### Cloud Sync
+When signed in to an account (see section 18), personal bests are synced to Firebase:
+- A new PB is uploaded immediately when it is set.
+- On sign-in, cloud PBs are merged with local records — the better value for each sub-mode wins.
+- Local PBs that are better than the cloud copy are uploaded during the merge.
+- This enables PBs to persist and sync across devices.
 
 ---
 
-## 17. Technical Notes
+## 18. Account System
+
+### Overview
+Players can create an account with an email and password. Accounts enable cross-device personal best sync and a persistent identity.
+
+### Registration
+- Requires a valid email address and password.
+- On account creation, a **random username** is automatically assigned in the format `AdjectiveNoun####` (e.g. `SwiftFalcon3847`).
+- Usernames can be changed at any time from the Account screen.
+
+### Sign In / Sign Out
+- Email and password authentication via Firebase Auth.
+- Sessions persist across page loads — the player remains signed in until they explicitly sign out.
+
+### Account Screen
+Accessible from the main menu or the Stats screen. The screen has two states:
+
+**Guest (not signed in):**
+- Email and password fields
+- "Sign In" and "Create Account" buttons
+- Error messages shown inline on failure
+
+**Signed in:**
+- Displays the player's username and email
+- **Change Username**: text field pre-filled with the current username; saved on click
+- **Delete Data**: removes all cloud PBs and clears local stats (with confirmation prompt)
+- **Delete Account**: permanently deletes the account and all associated data (with confirmation prompt; requires recent login)
+- **Sign Out** button
+
+### Stats Screen Integration
+The Stats screen shows a status bar indicating whether the player is signed in (displaying the username) or not. A button links directly to the Account screen.
+
+---
+
+## 19. Technical Notes
 
 - **Framework**: Vanilla HTML/JS, no build step
 - **Rendering**: HTML5 Canvas (2D context)
 - **Multiplayer backend**: Firebase Realtime Database
+- **Authentication**: Firebase Authentication (email/password)
 - **Piece rotation**: explicit state tables (no matrix math)
 - **Font**: DM Mono (body), Space Mono (headers/numbers)
 - **Lock delay**: 1000ms with 15-move reset cap
 - **Tick rate**: `requestAnimationFrame` (~60fps)
-- **Grid**: 10×20, cell size 20px (solo), 24px (VS)
+- **Grid**: 10×20, cell size 20px (solo), 28px (VS)

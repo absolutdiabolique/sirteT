@@ -1,12 +1,13 @@
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
-import { fmtTime, showToast, showSoloSplash, showSplash, updateCounters, drawMini, darken } from './ui.js';
+import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showSplash, updateCounters, drawMini } from './ui.js';
+import { createBoard } from './board.js';
 import { loadStats, saveStats, recordSprintTime, recordBlitzScore } from './stats.js';
 
 // Canvas setup
 const boardEl = document.getElementById('board');
-const ctx     = boardEl.getContext('2d');
+const board   = createBoard(boardEl, SZ);
 const hcanvas = document.getElementById('hold-canvas');
 const hctx    = hcanvas.getContext('2d');
 
@@ -191,7 +192,7 @@ function clearLines(spin, pieceKey) {
   document.getElementById('lines').textContent  = lines;
   document.getElementById('level').textContent  = level;
 
-  showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, spin);
+  if (attack > 0) showAttackSplash('board-wrap', attack);
 
   const clearLabel = isPerfectClear ? 'PERFECT CLEAR'
     : isColoredClear ? 'COLORED CLEAR'
@@ -252,31 +253,6 @@ function doLock() {
 }
 
 // ── Drawing ───────────────────────────────────────────────────
-function drawCell(c,x,y,alpha=1,cx=ctx,sz=SZ) {
-  if(!c||c==='__inv__') return;
-  cx.globalAlpha=alpha; cx.fillStyle=c;
-  cx.fillRect(x*sz+1,y*sz+1,sz-2,sz-2);
-  cx.globalAlpha=1;
-}
-function drawBoard() {
-  ctx.fillStyle='#0a0a0c'; ctx.fillRect(0,0,boardEl.width,boardEl.height);
-  if (cfg.gridOn) {
-    ctx.strokeStyle=cfg.gridColor; ctx.lineWidth=cfg.gridWidth;
-    for(let r=0;r<=ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*SZ);ctx.lineTo(COLS*SZ,r*SZ);ctx.stroke();}
-    for(let c=0;c<=COLS;c++){ctx.beginPath();ctx.moveTo(c*SZ,0);ctx.lineTo(c*SZ,ROWS*SZ);ctx.stroke();}
-  }
-  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) if(grid[r][c]&&grid[r][c]!=='__inv__') drawCell(grid[r][c],c,r);
-  if (piece&&cfg.ghostOpacity>0) {
-    const gy=ghostY();
-    for(let r=0;r<piece.shape.length;r++) for(let c=0;c<piece.shape[r].length;c++)
-      if(piece.shape[r][c]) drawCell(pieceColors[piece.key],piece.x+c,gy+r,cfg.ghostOpacity);
-  }
-  if (piece) {
-    const col=lockFlashing&&!lockBright ? darken(pieceColors[piece.key]) : pieceColors[piece.key];
-    for(let r=0;r<piece.shape.length;r++) for(let c=0;c<piece.shape[r].length;c++)
-      if(piece.shape[r][c]) drawCell(col,piece.x+c,piece.y+r);
-  }
-}
 export function drawHold() {
   hctx.globalAlpha=cfg.holdMode==='none'?0.2:1;
   drawMini(hctx,heldKey,hcanvas.width,hcanvas.height);
@@ -311,13 +287,21 @@ function loop(ts) {
       dropAcc+=dt;
       if(dropAcc>getInterval()){dropAcc=0; piece.y++; onMove();}
     }
-    drawBoard(); drawPreviews(); drawHold();
+    board.draw({
+      grid, piece,
+      ghostY: (piece && cfg.ghostOpacity > 0) ? ghostY() : null,
+      lockFlashing, lockBright,
+      ghostOpacity: cfg.ghostOpacity,
+      gridOn: cfg.gridOn, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth,
+    });
+    drawPreviews(); drawHold();
   }
   rafId=requestAnimationFrame(loop);
 }
 
 // ── Start / game over ─────────────────────────────────────────
 export function startGame() {
+  clearAttackSplash('board-wrap');
   grid=mkGrid(); score=0; lines=0; level=1; dropAcc=0; b2bCount=0; comboCount=0;
   updateCounters('board-wrap', 0, 0);
   soloBag=[]; soloQueue=[]; heldKey=null; holdUsed=false;

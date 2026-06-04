@@ -1,7 +1,9 @@
 import { db } from './firebase.js';
 import { loadGlobal, cfg, keybinds, checkBind, saveGlobal } from './state.js';
 import { showScreen as _showScreen, drawMini } from './ui.js';
-import { renderStats } from './stats.js';
+import { renderStats, setUploader } from './stats.js';
+import { initAuth, signUp, logIn, logOut, uploadPB,
+  currentUser, currentUsername, changeUsername, deleteData, deleteAccount } from './account.js';
 import { syncSettingsUI, updateHandlingSummary, buildKeybindTable, buildPieceColorPickers,
   resetSettings, selectMode, selectedMode, applyPreset, readSetupCfg,
   getListeningFor, captureKey, selectSub } from './settings.js';
@@ -12,15 +14,20 @@ import { startGame, togglePause, stopGame, running, paused,
 import { vsRunning, vsRunLoop, vsPiece, stopVsGame, createRoom, joinRoom,
   startVsGame, leaveRoom, rematchGame, vsStartDAS, vsStopDAS, vsStartSD, vsStopSD,
   vsTryRotate, vsTryRotate180, vsHardDrop, vsDoHold } from './vs.js';
+import { botRunning, botRunLoop, botPiece, startBotGame, stopBotGame, botRematchGame,
+  botStartDAS, botStopDAS, botStartSD, botStopSD,
+  botTryRotate, botTryRotate180, botHardDrop, botDoHold } from './bot.js';
 
 // Full showScreen with side effects
 function showScreen(id) {
   _showScreen(id);
-  if (id === 'screen-stats') renderStats();
-  if (id === 'screen-setup') { updateHandlingSummary(); selectMode(selectedMode || 'marathon'); }
+  if (id === 'screen-stats')   renderStats();
+  if (id === 'screen-setup')   { updateHandlingSummary(); selectMode(selectedMode || 'sprint'); }
+  if (id === 'screen-account') refreshAccountScreen();
   if (id === 'screen-menu') {
     if (running) stopGame();
     if (vsRunning) stopVsGame();
+    if (botRunning) stopBotGame();
   }
 }
 
@@ -32,13 +39,121 @@ function setFbStatus(s) {
 // Window exposures
 window.showScreen    = showScreen;
 window.beginGame     = () => { readSetupCfg(); showScreen('screen-game'); startGame(); };
+window.beginBotGame  = () => {
+  showScreen('screen-bot');
+  const pps   = parseFloat(document.getElementById('bot-pps-input').value) || 1.5;
+  const aiVer = parseInt(document.getElementById('bot-ai-select').value) || 1;
+  startBotGame(pps, aiVer);
+};
 window.applyPreset   = applyPreset;
 window.createRoom    = createRoom;
 window.joinRoom      = joinRoom;
 window.startVsGame   = startVsGame;
 window.leaveRoom     = leaveRoom;
 window.vsRematch     = rematchGame;
+window.botRematch    = botRematchGame;
 window.clearStats    = () => { if(confirm('Clear all stats?')) { localStorage.removeItem('sirtet_stats'); renderStats(); } };
+
+// ── Account screen ────────────────────────────────────────────
+function fmtAuthErr(e) {
+  return e.message.replace('Firebase: ', '').replace(/ \(auth\/[^)]+\)\.?/, '');
+}
+
+function refreshAccountScreen() {
+  const user     = currentUser();
+  const username = currentUsername();
+  const guestEl  = document.getElementById('account-guest');
+  const userEl   = document.getElementById('account-user');
+  if (!guestEl || !userEl) return;
+  if (user) {
+    guestEl.style.display = 'none';
+    userEl.style.display  = 'block';
+    const unEl = document.getElementById('account-username-display');
+    const emEl = document.getElementById('account-email-display');
+    const inEl = document.getElementById('account-new-username');
+    if (unEl) unEl.textContent = username || '—';
+    if (emEl) emEl.textContent = user.email;
+    if (inEl) inEl.value       = username || '';
+    document.getElementById('account-username-err').textContent = '';
+  } else {
+    guestEl.style.display = 'block';
+    userEl.style.display  = 'none';
+    document.getElementById('auth-email').value    = '';
+    document.getElementById('auth-password').value = '';
+    document.getElementById('auth-error').textContent = '';
+  }
+}
+
+function updateAuthBar(user, username) {
+  const statusEl = document.getElementById('auth-status');
+  if (!statusEl) return;
+  if (user) {
+    statusEl.textContent = username || user.email;
+    statusEl.style.color = 'var(--accent2)';
+  } else {
+    statusEl.textContent = 'Sign in to sync PBs across devices';
+    statusEl.style.color = 'var(--muted)';
+  }
+}
+
+window.doSignUp = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pw    = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  try { await signUp(email, pw); }
+  catch(e) { errEl.textContent = fmtAuthErr(e); }
+};
+
+window.doLogIn = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pw    = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  try { await logIn(email, pw); }
+  catch(e) { errEl.textContent = fmtAuthErr(e); }
+};
+
+window.doLogOut = async function() { await logOut(); };
+
+window.doChangeUsername = async function() {
+  const val    = document.getElementById('account-new-username').value.trim();
+  const errEl  = document.getElementById('account-username-err');
+  errEl.textContent = '';
+  try {
+    await changeUsername(val);
+    document.getElementById('account-username-display').textContent = val;
+    updateAuthBar(currentUser(), val);
+    errEl.style.color   = 'var(--accent2)';
+    errEl.textContent   = 'Username updated.';
+    setTimeout(() => { errEl.textContent = ''; errEl.style.color = ''; }, 2000);
+  } catch(e) {
+    errEl.style.color = '';
+    errEl.textContent = e.message;
+  }
+};
+
+window.doDeleteData = async function() {
+  if (!confirm('Delete all your personal bests? This cannot be undone.')) return;
+  try {
+    await deleteData();
+    renderStats();
+    alert('Data deleted.');
+  } catch(e) { alert(e.message); }
+};
+
+window.doDeleteAccount = async function() {
+  if (!confirm('Permanently delete your account and all data? This cannot be undone.')) return;
+  try {
+    await deleteAccount();
+  } catch(e) {
+    if (e.code === 'auth/requires-recent-login') {
+      alert('Please sign out and sign back in, then try again.');
+    } else {
+      alert(e.message);
+    }
+  }
+};
 window.resetSettings = resetSettings;
 window.selectMode    = selectMode;
 window.selectSub     = selectSub;
@@ -63,6 +178,7 @@ document.addEventListener('keydown', e => {
 
   const onGame = document.getElementById('screen-game').classList.contains('active');
   const onVs   = document.getElementById('screen-vs').classList.contains('active');
+  const onBot  = document.getElementById('screen-bot').classList.contains('active');
 
   if (onGame) {
     if (!running && checkBind(e,'hardDrop')) { startGame(); return; }
@@ -87,11 +203,22 @@ document.addEventListener('keydown', e => {
     if (checkBind(e,'moveLeft'))   { vsStartDAS(-1);    return; }
     if (checkBind(e,'moveRight'))  { vsStartDAS(1);     return; }
   }
+  if (onBot && botRunLoop && botPiece) {
+    if (checkBind(e,'hardDrop'))   { botHardDrop();       return; }
+    if (checkBind(e,'hold'))       { botDoHold();         return; }
+    if (checkBind(e,'rotateCW'))   { botTryRotate(false); return; }
+    if (checkBind(e,'rotateCCW'))  { botTryRotate(true);  return; }
+    if (checkBind(e,'rotate180'))  { botTryRotate180();   return; }
+    if (checkBind(e,'softDrop'))   { botStartSD();        return; }
+    if (checkBind(e,'moveLeft'))   { botStartDAS(-1);     return; }
+    if (checkBind(e,'moveRight'))  { botStartDAS(1);      return; }
+  }
 }, { capture: true });
 
 document.addEventListener('keyup', e => {
   const onGame = document.getElementById('screen-game').classList.contains('active');
   const onVs   = document.getElementById('screen-vs').classList.contains('active');
+  const onBot  = document.getElementById('screen-bot').classList.contains('active');
   if (onGame) {
     if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) stopDAS();
     if (checkBind(e,'softDrop')) stopSD();
@@ -99,6 +226,10 @@ document.addEventListener('keyup', e => {
   if (onVs) {
     if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) vsStopDAS();
     if (checkBind(e,'softDrop')) vsStopSD();
+  }
+  if (onBot) {
+    if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) botStopDAS();
+    if (checkBind(e,'softDrop')) botStopSD();
   }
 });
 
@@ -112,8 +243,14 @@ syncSettingsUI();
 buildKeybindTable();
 buildPieceColorPickers();
 updateHandlingSummary();
-selectMode('marathon');
+selectMode('sprint');
 setFbStatus(db ? 'ok' : 'err');
+setUploader(uploadPB);
+initAuth((user, username) => {
+  updateAuthBar(user, username);
+  refreshAccountScreen();
+  if (document.getElementById('screen-stats').classList.contains('active')) renderStats();
+});
 
 // Initial blank canvas draws
 const boardEl   = document.getElementById('board');

@@ -1,5 +1,8 @@
 import { fmtTime } from './ui.js';
 
+let _uploader = null;
+export function setUploader(fn) { _uploader = fn; }
+
 export function loadStats()  { try { return JSON.parse(localStorage.getItem('sirtet_stats')||'{}'); } catch(e) { return {}; } }
 export function saveStats(s) { localStorage.setItem('sirtet_stats', JSON.stringify(s)); }
 
@@ -10,6 +13,7 @@ export function recordSprintTime(ms, subKey) {
   if (!s[key] || ms < s[key].ms) {
     s[key] = { ms, date: new Date().toISOString() };
     saveStats(s);
+    if (_uploader) _uploader(key, s[key]);
   }
 }
 
@@ -19,6 +23,7 @@ export function recordBlitzScore(lines, subKey) {
   if (!s[key] || lines > s[key].lines) {
     s[key] = { lines, date: new Date().toISOString() };
     saveStats(s);
+    if (_uploader) _uploader(key, s[key]);
   }
 }
 

@@ -23,42 +23,121 @@ export function fmtTime(ms) {
   return `${m}:${String(sec).padStart(2,'0')}.${String(msec).padStart(3,'0')}`;
 }
 
-export function splashHTML(text) {
-  let digitIdx = 0;
-  return Array.from(text).map(ch => {
-    let delay = 0;
-    if (/\d/.test(ch)) { delay = digitIdx * 100; digitIdx++; }
-    return `<span class="splash-char" style="animation-delay:${delay}ms">${ch}</span>`;
-  }).join('');
+// Per-wrapId splash state map
+const _splashState = {};
+
+function _makeSplashDigits(text) {
+  return Array.from(text).map((ch, i) =>
+    `<span class="attack-digit" style="--digit-delay:${i * 50}ms">${ch}</span>`
+  ).join('');
 }
 
-export function showSoloSplash(cleared, attack, isPerfectClear, isColoredClear, spin) {
-  if (attack === 0 && !isPerfectClear && !isColoredClear) return;
-  const boardWrap = document.getElementById('board-wrap');
-  if (!boardWrap) return;
-
-  const existing = boardWrap.querySelector('.vs-splash');
-  const now = Date.now();
-  if (existing && existing._splashTime && (now - existing._splashTime) < 1000) {
-    existing._splashTotal = (existing._splashTotal || 0) + attack;
-    existing._splashTime = now;
-    clearTimeout(existing._splashTimeout);
-    existing.innerHTML = splashHTML('+' + existing._splashTotal);
-    existing._splashTimeout = setTimeout(() => existing.remove(), 1800);
-    return;
-  }
-  if (existing) existing.remove();
-
-  if (attack === 0) return;
-
+function _startSplash(wrap, wrapId, total, onComplete) {
   const el = document.createElement('div');
-  el.className = 'vs-splash';
-  el.innerHTML = splashHTML('+' + attack);
-  el._splashTotal = attack;
-  el._splashTime = now;
-  boardWrap.style.position = 'relative';
-  boardWrap.appendChild(el);
-  el._splashTimeout = setTimeout(() => el.remove(), 1800);
+  el.className = 'attack-splash';
+  el.innerHTML = _makeSplashDigits('' + total);
+  wrap.appendChild(el);
+
+  const state = { element: el, total, onComplete };
+  state.fadeTimeout = setTimeout(() => {
+    el.classList.add('fading');
+    state.removeTimeout = setTimeout(() => {
+      el.remove();
+      delete _splashState[wrapId];
+      if (onComplete) onComplete(total);
+    }, 100);
+  }, 900);
+  _splashState[wrapId] = state;
+}
+
+export function showAttackSplash(wrapId, amount, onComplete) {
+  if (!amount || amount <= 0) return;
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) { if (onComplete) onComplete(amount); return; }
+
+  const s = _splashState[wrapId];
+  if (s) {
+    clearTimeout(s.fadeTimeout);
+    clearTimeout(s.removeTimeout);
+    if (s.element) s.element.remove();
+    _startSplash(wrap, wrapId, s.total + amount, s.onComplete);
+  } else {
+    _startSplash(wrap, wrapId, amount, onComplete);
+  }
+}
+
+// ── Cancel splash ─────────────────────────────────────────────
+const _cancelState = {};
+
+function _startCancelSplash(wrap, wrapId, total) {
+  const el = document.createElement('div');
+  el.className = 'cancel-splash';
+  el.innerHTML = Array.from('' + total).map((ch, i) =>
+    `<span class="cancel-digit" style="--digit-delay:${i * 50}ms">${ch}</span>`
+  ).join('');
+  wrap.appendChild(el);
+  const state = { element: el, total };
+  state.fadeTimeout = setTimeout(() => {
+    el.classList.add('fading');
+    state.removeTimeout = setTimeout(() => {
+      el.remove();
+      delete _cancelState[wrapId];
+    }, 100);
+  }, 900);
+  _cancelState[wrapId] = state;
+}
+
+export function showCancelSplash(wrapId, amount) {
+  if (!amount || amount <= 0) return;
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const s = _cancelState[wrapId];
+  if (s) {
+    clearTimeout(s.fadeTimeout);
+    clearTimeout(s.removeTimeout);
+    if (s.element) s.element.remove();
+    _startCancelSplash(wrap, wrapId, s.total + amount);
+  } else {
+    _startCancelSplash(wrap, wrapId, amount);
+  }
+}
+
+export function clearCancelSplash(wrapId) {
+  const s = _cancelState[wrapId];
+  if (!s) return;
+  clearTimeout(s.fadeTimeout);
+  clearTimeout(s.removeTimeout);
+  if (s.element) s.element.remove();
+  delete _cancelState[wrapId];
+}
+
+// ── Garbage bar ───────────────────────────────────────────────
+const PX_PER_ROW = 28; // VS_SZ = 28; 1 garbage row = 1 board cell height
+
+export function updateGarbageBar(barId, queue) {
+  const bar = document.getElementById(barId);
+  if (!bar) return;
+  bar.innerHTML = '';
+  for (let i = 0; i < queue.length; i++) {
+    if (i > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'garbage-seg-sep';
+      bar.appendChild(sep);
+    }
+    const seg = document.createElement('div');
+    seg.className = 'garbage-seg';
+    seg.style.height = (queue[i] * PX_PER_ROW) + 'px';
+    bar.appendChild(seg);
+  }
+}
+
+export function clearAttackSplash(wrapId) {
+  const s = _splashState[wrapId];
+  if (!s) return;
+  clearTimeout(s.fadeTimeout);
+  clearTimeout(s.removeTimeout);
+  if (s.element) s.element.remove();
+  delete _splashState[wrapId];
 }
 
 export function updateCounters(wrapId, comboCount, b2bCount) {
@@ -74,6 +153,23 @@ export function updateCounters(wrapId, comboCount, b2bCount) {
     b2bEl.textContent = b2bCount > 0 ? `B2B ${b2bCount}` : '';
     b2bEl.classList.toggle('active', b2bCount > 0);
   }
+}
+
+export function showRainbowSplash(wrapId, text, side = 'left') {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.querySelectorAll('.clear-splash').forEach(el => el.remove());
+  const el = document.createElement('div');
+  el.className = `clear-splash side-${side}`;
+  const colors = Object.values(pieceColors);
+  let ci = 0;
+  el.innerHTML = Array.from(text).map(ch => {
+    if (ch === ' ') return ' ';
+    const color = colors[ci++ % colors.length];
+    return `<span style="color:${color}">${ch}</span>`;
+  }).join('');
+  wrap.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
 }
 
 export function showSplash(wrapId, label, pieceKey, spin, side='left') {
@@ -97,13 +193,6 @@ export function showSplash(wrapId, label, pieceKey, spin, side='left') {
   }
 }
 
-export function showVsSplash(text, n) {
-  const old=document.getElementById('vs-my-board-wrap').querySelector('.vs-splash');
-  if(old)old.remove();
-  const el=document.createElement('div'); el.className='vs-splash'; el.innerHTML=splashHTML(text);
-  document.getElementById('vs-my-board-wrap').appendChild(el);
-  setTimeout(()=>el.remove(),1800);
-}
 
 // Only the DOM part — no side effects
 export function showScreen(id) {

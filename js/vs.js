@@ -1,16 +1,17 @@
 import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
-import { fmtTime, showToast, showVsSplash, showSplash, updateCounters, drawMini, darken } from './ui.js';
+import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini } from './ui.js';
+import { createBoard } from './board.js';
 import { db } from './firebase.js';
 import { ref, set, get, onValue, off, serverTimestamp, remove, update }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 // Canvas setup
 const vsBoardEl  = document.getElementById('vs-my-board');
-const vsCtx      = vsBoardEl.getContext('2d');
+const myBoard    = createBoard(vsBoardEl, VS_SZ);
 const vsOppEl    = document.getElementById('vs-opp-board');
-const vsOppCtx   = vsOppEl.getContext('2d');
+const oppBoard   = createBoard(vsOppEl, VS_SZ);
 const vsHoldEl   = document.getElementById('vs-hold-canvas');
 const vsHoldCtx  = vsHoldEl.getContext('2d');
 
@@ -20,7 +21,7 @@ let vsGrid;
 export let vsPiece=null;
 let vsHeldKey, vsHoldUsed, vsQueue=[];
 let vsScore=0, vsLines=0, vsLevel=1, vsDropAcc=0;
-let vsPendingGarbage=0, oppGrid=null, oppNextQueue=[];
+let vsGarbageQueue=[], oppGrid=null, oppNextQueue=[];
 let vsComboCount=0, vsB2bCount=0;
 let vsRafId=null, vsLastTime=0, vsTimerInterval=null;
 let vsLockTimer=null, vsLockFlashTimer=null, vsLockFlashing=false, vsLockBright=true;
@@ -29,6 +30,7 @@ let vsLockMoves=0;
 let myPlayerId=null, roomId=null, mySlot=null;
 let roomRef=null, roomListener=null;
 let currentGameId=null;
+let vsLinesSent=0, vsPieces=0, vsGameStartMs=0;
 
 // Shared sequence for VS bags
 let sharedSeq=[], vsSeqIdx=0;
@@ -147,28 +149,52 @@ function enterVsGame(data,spectate=false) {
 }
 
 function initVsGame() {
+  clearAttackSplash('vs-my-board-wrap');
+  clearCancelSplash('vs-my-board-wrap');
   vsGrid=mkGrid(); vsPiece=null; vsHeldKey=null; vsHoldUsed=false;
   vsQueue=[]; vsScore=0; vsLines=0; vsLevel=1; vsDropAcc=0;
-  vsPendingGarbage=0; oppGrid=mkGrid(); oppNextQueue=[];
+  vsGarbageQueue=[]; oppGrid=mkGrid(); oppNextQueue=[];
+  updateGarbageBar('vs-garbage-bar', vsGarbageQueue);
   vsComboCount=0; vsB2bCount=0;
+  vsLinesSent=0; vsPieces=0;
   updateCounters('vs-my-board-wrap', 0, 0);
-  document.getElementById('vs-score').textContent='0';
-  document.getElementById('vs-lines').textContent='0';
+  ['vs-lines','vs-lines-sent','vs-pieces','vs-apm','vs-pps'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
+  ['vs-opp-lines','vs-opp-lines-sent','vs-opp-pieces','vs-opp-apm','vs-opp-pps'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
   document.getElementById('vs-overlay').style.display='none';
   const _rb=document.getElementById('vs-rematch-btn');if(_rb)_rb.style.display='none';
   vsEnsureQueue(); vsSpawnNext(); buildVsPreviews(); buildOppPreviews();
   vsRunLoop=true; vsLastTime=performance.now();
   cancelAnimationFrame(vsRafId);
   vsRafId=requestAnimationFrame(vsLoop);
-  const t0=performance.now();
+  vsGameStartMs=performance.now();
   if(vsTimerInterval) clearInterval(vsTimerInterval);
   vsTimerInterval=setInterval(()=>{
-    document.getElementById('vs-timer').textContent=fmtTime(performance.now()-t0).slice(0,7);
+    const elapsed=performance.now()-vsGameStartMs;
+    const sec=elapsed/1000, min=sec/60;
+    document.getElementById('vs-timer').textContent=fmtTime(elapsed).slice(0,7);
+    document.getElementById('vs-lines').textContent=vsLines;
+    document.getElementById('vs-lines-sent').textContent=vsLinesSent;
+    document.getElementById('vs-pieces').textContent=vsPieces;
+    document.getElementById('vs-apm').textContent=min>0.1?(vsLinesSent/min).toFixed(1):'0';
+    document.getElementById('vs-pps').textContent=sec>1?(vsPieces/sec).toFixed(2):'0.00';
   },500);
 }
 
 function vsEnsureQueue(){while(vsQueue.length<5)vsQueue.push(sharedSeq[vsSeqIdx++]);}
 function vsDequeue(){vsEnsureQueue();const k=vsQueue.shift();vsEnsureQueue();return k;}
+
+function getCancelPower(cleared,spin){
+  if(spin) return [0,2,4,8,12][Math.min(cleared,4)];
+  return [0,1,2,4,6][Math.min(cleared,4)];
+}
+function applyCancel(queue,power){
+  let remaining=power,cancelled=0;
+  while(remaining>0&&queue.length>0){
+    if(remaining>=queue[0]){cancelled+=queue[0];remaining-=queue[0];queue.shift();}
+    else{queue[0]-=remaining;cancelled+=remaining;remaining=0;}
+  }
+  return cancelled;
+}
 
 function vsBaseAttack(cleared,spin){
   if(spin) return [0,2,4,7][Math.min(cleared,3)];
@@ -234,6 +260,7 @@ function vsSpawnNext(){
   vsOnMove();
 }
 function vsDoLock(){
+  vsPieces++;
   const willSpin=vsIsSpin();
   const lockedKey=vsPiece.key;
   for(let r=0;r<vsPiece.shape.length;r++)for(let c=0;c<vsPiece.shape[r].length;c++){
@@ -242,37 +269,77 @@ function vsDoLock(){
     if(row<0){vsGameOver();return;}
     vsGrid[row][col]=pieceColors[vsPiece.key];
   }
-  vsClearLines(willSpin,lockedKey); vsSpawnNext(); vsHoldUsed=false;
-  if(vsPendingGarbage>0){addGarbage(vsGrid,vsPendingGarbage);vsPendingGarbage=0;}
+  const cleared=vsClearLines(willSpin,lockedKey);
+  vsSpawnNext(); vsHoldUsed=false;
+  if(cleared===0&&vsGarbageQueue.length>0){
+    addGarbage(vsGrid,vsGarbageQueue.shift());
+    updateGarbageBar('vs-garbage-bar',vsGarbageQueue);
+  }
   pushBoard();
 }
 function vsClearLines(spin,pieceKey){
   let cleared=0;
-  for(let r=ROWS-1;r>=0;r--){if(vsGrid[r].every(c=>c)){vsGrid.splice(r,1);vsGrid.unshift(Array(COLS).fill(null));cleared++;r++;}}
+  for(let r=ROWS-1;r>=0;r--){
+    if(vsGrid[r].every(c=>c)){vsGrid.splice(r,1);vsGrid.unshift(Array(COLS).fill(null));cleared++;r++;}
+  }
   if(cleared===0){
     vsComboCount=0;
     if(spin) showSplash('vs-my-board-wrap','',pieceKey,true,'left');
     updateCounters('vs-my-board-wrap',0,vsB2bCount);
-    return;
+    return 0;
   }
   vsScore+=[0,100,300,500,800][cleared]*vsLevel;
   vsLines+=cleared; vsLevel=Math.floor(vsLines/10)+1;
-  document.getElementById('vs-score').textContent=vsScore;
-  document.getElementById('vs-lines').textContent=vsLines;
-  const isPerfect=vsGrid.every(row=>row.every(c=>!c));
+  const hasColoredLeft=vsGrid.some(row=>row.some(c=>c&&c!=='#444455'));
+  const hasGarbageLeft=vsGrid.some(row=>row.some(c=>c==='#444455'));
+  const isPerfect=!hasColoredLeft&&!hasGarbageLeft;
+  const isColoredClear=!hasColoredLeft&&hasGarbageLeft;
   const isB2BEligible=cleared>=4||spin;
+
+  // Try to cancel incoming garbage first
+  if(vsGarbageQueue.length>0){
+    const cancelPow=getCancelPower(cleared,spin);
+    const cancelled=applyCancel(vsGarbageQueue,cancelPow);
+    if(cancelled>0){
+      updateGarbageBar('vs-garbage-bar',vsGarbageQueue);
+      showCancelSplash('vs-my-board-wrap',cancelled);
+      if(isB2BEligible||isPerfect||isColoredClear) vsB2bCount++; else vsB2bCount=0;
+      vsComboCount++;
+      updateCounters('vs-my-board-wrap',vsComboCount,vsB2bCount);
+      if(isPerfect||isColoredClear){
+        showSplash('vs-my-board-wrap',null,pieceKey,spin,'left');
+        showRainbowSplash('vs-my-board-wrap',isPerfect?'PERFECT CLEAR':'COLORED CLEAR','left');
+      } else {
+        showSplash('vs-my-board-wrap',['','SINGLE','DOUBLE','TRIPLE','QUAD'][Math.min(cleared,4)],pieceKey,spin,'left');
+      }
+      return cleared;
+    }
+  }
+
+  // Normal attack flow
   let rawBase;
-  if(isPerfect){ rawBase=10; }
-  else{ rawBase=vsBaseAttack(cleared,spin)+(isB2BEligible?vsB2bBonus(vsB2bCount):0); }
+  if(isPerfect){rawBase=10;}
+  else if(isColoredClear){rawBase=5;}
+  else{rawBase=vsBaseAttack(cleared,spin)+(isB2BEligible?vsB2bBonus(vsB2bCount):0);}
   const garbage=Math.floor(rawBase*(1+0.2*vsComboCount));
-  if(isB2BEligible||isPerfect) vsB2bCount++; else vsB2bCount=0;
+  if(isB2BEligible||isPerfect||isColoredClear) vsB2bCount++; else vsB2bCount=0;
   vsComboCount++;
   updateCounters('vs-my-board-wrap',vsComboCount,vsB2bCount);
-  if(isPerfect) showVsSplash('PERFECT\nCLEAR',garbage);
-  else if(garbage>0) showVsSplash(cleared>=4?'QUAD':cleared>=3?'TRIPLE':'+'+garbage+' LINE'+(cleared>1?'S':''),garbage);
-  if(garbage>0) sendGarbage(garbage);
-  const vsLabel=isPerfect?'PERFECT CLEAR':['','SINGLE','DOUBLE','TRIPLE','QUAD'][Math.min(cleared,4)];
-  showSplash('vs-my-board-wrap',vsLabel,pieceKey,spin,'left');
+  if(garbage>0){
+    vsLinesSent+=garbage;
+    showAttackSplash('vs-my-board-wrap',garbage,(total)=>{
+      if(!vsRunLoop)return;
+      if(!db||!roomId||!myPlayerId)return;
+      set(ref(db,`rooms/${roomId}/garbage/${Date.now()}`),{from:myPlayerId,lines:total});
+    });
+  }
+  if(isPerfect||isColoredClear){
+    showSplash('vs-my-board-wrap',null,pieceKey,spin,'left');
+    showRainbowSplash('vs-my-board-wrap',isPerfect?'PERFECT CLEAR':'COLORED CLEAR','left');
+  } else {
+    showSplash('vs-my-board-wrap',['','SINGLE','DOUBLE','TRIPLE','QUAD'][Math.min(cleared,4)],pieceKey,spin,'left');
+  }
+  return cleared;
 }
 function addGarbage(g,n){
   const col=Math.floor(Math.random()*COLS);
@@ -285,36 +352,56 @@ function deserializeGrid(s){if(!s)return mkGrid();return s.split('|').map(r=>r.s
 async function pushBoard(){
   if(!db||!roomId||!myPlayerId)return;
   await update(ref(db,`rooms/${roomId}/players/${myPlayerId}`),{
-    board:serializeGrid(vsGrid), score:vsScore, lines:vsLines, alive:true, queue:vsQueue.slice(0,3)
+    board:serializeGrid(vsGrid), score:vsScore, lines:vsLines, alive:true,
+    queue:vsQueue.slice(0,3), linesSent:vsLinesSent, pieces:vsPieces
   });
 }
-async function sendGarbage(n){
-  if(!db||!roomId||!myPlayerId)return;
-  await set(ref(db,`rooms/${roomId}/garbage/${Date.now()}`),{from:myPlayerId,lines:n});
-}
+
 function updateOppBoard(data){
   const players=data.players||{};
+  const elapsed=performance.now()-vsGameStartMs;
+  const sec=elapsed/1000, min=sec/60;
   if(vsSpectating){
     const p1=Object.values(players).find(p=>p&&p.slot===1);
     const p2=Object.values(players).find(p=>p&&p.slot===2);
-    if(p1){vsGrid=deserializeGrid(p1.board);document.getElementById('vs-score').textContent=p1.score||0;if(Array.isArray(p1.queue)){vsQueue=[...p1.queue];drawVsPreviews();}}
-    if(p2){oppGrid=deserializeGrid(p2.board);document.getElementById('vs-opp-score').textContent=p2.score||0;if(Array.isArray(p2.queue)){oppNextQueue=p2.queue;drawOppPreviews();}}
+    if(p1){
+      vsGrid=deserializeGrid(p1.board);
+      if(Array.isArray(p1.queue)){vsQueue=[...p1.queue];drawVsPreviews();}
+      document.getElementById('vs-lines').textContent=p1.lines||0;
+      document.getElementById('vs-lines-sent').textContent=p1.linesSent||0;
+      document.getElementById('vs-pieces').textContent=p1.pieces||0;
+      document.getElementById('vs-apm').textContent=min>0.1?((p1.linesSent||0)/min).toFixed(1):'0';
+      document.getElementById('vs-pps').textContent=sec>1?((p1.pieces||0)/sec).toFixed(2):'0.00';
+    }
+    if(p2){
+      oppGrid=deserializeGrid(p2.board);
+      if(Array.isArray(p2.queue)){oppNextQueue=p2.queue;drawOppPreviews();}
+      document.getElementById('vs-opp-lines').textContent=p2.lines||0;
+      document.getElementById('vs-opp-lines-sent').textContent=p2.linesSent||0;
+      document.getElementById('vs-opp-pieces').textContent=p2.pieces||0;
+      document.getElementById('vs-opp-apm').textContent=min>0.1?((p2.linesSent||0)/min).toFixed(1):'0';
+      document.getElementById('vs-opp-pps').textContent=sec>1?((p2.pieces||0)/sec).toFixed(2):'0.00';
+    }
     return;
   }
   const opp=Object.entries(players).find(([id])=>id!==myPlayerId);
   if(opp){
     const od=opp[1];
     oppGrid=deserializeGrid(od.board);
-    document.getElementById('vs-opp-score').textContent=od.score||0;
     document.getElementById('vs-opp-lines').textContent=od.lines||0;
+    document.getElementById('vs-opp-lines-sent').textContent=od.linesSent||0;
+    document.getElementById('vs-opp-pieces').textContent=od.pieces||0;
+    document.getElementById('vs-opp-apm').textContent=min>0.1?((od.linesSent||0)/min).toFixed(1):'0';
+    document.getElementById('vs-opp-pps').textContent=sec>1?((od.pieces||0)/sec).toFixed(2):'0.00';
     if(Array.isArray(od.queue)){oppNextQueue=od.queue;drawOppPreviews();}
     if(od.alive===false)handleVsWin();
   }
   const garb=data.garbage||{};
+  let garbChanged=false;
   Object.entries(garb).forEach(([key,g])=>{
-    if(g.from!==myPlayerId){vsPendingGarbage+=g.lines;remove(ref(db,`rooms/${roomId}/garbage/${key}`));}
+    if(g.from!==myPlayerId){vsGarbageQueue.push(g.lines);garbChanged=true;remove(ref(db,`rooms/${roomId}/garbage/${key}`));}
   });
-  document.getElementById('vs-garbage-fill').style.height=Math.min(100,vsPendingGarbage/20*100)+'%';
+  if(garbChanged) updateGarbageBar('vs-garbage-bar',vsGarbageQueue);
 }
 
 async function vsGameOver(){
@@ -357,41 +444,24 @@ function vsLoop(ts){
   if(!vsRunLoop)return;
   const dt=Math.min(ts-vsLastTime,100);vsLastTime=ts;
   if(vsPiece&&!vsIsGrounded()){vsDropAcc+=dt;if(vsDropAcc>getVsInterval()){vsDropAcc=0;vsPiece.y++;vsOnMove();pushBoard();}}
-  drawVsBoard();drawOppBoard();drawVsPreviews();drawOppPreviews();drawVsHold();
+  myBoard.draw({
+    grid:vsGrid, piece:vsPiece,
+    ghostY:vsPiece?vsGhostY():null,
+    lockFlashing:vsLockFlashing, lockBright:vsLockBright,
+    ghostOpacity:cfg.ghostOpacity, gridOn:true,
+  });
+  oppBoard.draw({grid:oppGrid, gridOn:true});
+  drawVsPreviews();drawOppPreviews();drawVsHold();
   vsRafId=requestAnimationFrame(vsLoop);
 }
 function vsSpectatorLoop(ts){
-  drawVsBoard();drawOppBoard();drawVsPreviews();drawOppPreviews();
+  myBoard.draw({grid:vsGrid, gridOn:true});
+  oppBoard.draw({grid:oppGrid, gridOn:true});
+  drawVsPreviews();drawOppPreviews();
   vsRafId=requestAnimationFrame(vsSpectatorLoop);
 }
 
 // VS rendering
-function drawVsCell(c,x,y,alpha=1,cx=vsCtx){
-  if(!c||c==='__inv__')return;cx.globalAlpha=alpha;cx.fillStyle=c;
-  cx.fillRect(x*VS_SZ+1,y*VS_SZ+1,VS_SZ-2,VS_SZ-2);cx.globalAlpha=1;
-}
-function drawVsBoard(){
-  vsCtx.fillStyle='#0a0a0c';vsCtx.fillRect(0,0,vsBoardEl.width,vsBoardEl.height);
-  vsCtx.strokeStyle='rgba(255,255,255,0.04)';vsCtx.lineWidth=0.5;
-  for(let r=0;r<=ROWS;r++){vsCtx.beginPath();vsCtx.moveTo(0,r*VS_SZ);vsCtx.lineTo(COLS*VS_SZ,r*VS_SZ);vsCtx.stroke();}
-  for(let c=0;c<=COLS;c++){vsCtx.beginPath();vsCtx.moveTo(c*VS_SZ,0);vsCtx.lineTo(c*VS_SZ,ROWS*VS_SZ);vsCtx.stroke();}
-  if(vsGrid)for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(vsGrid[r][c])drawVsCell(vsGrid[r][c],c,r);
-  if(vsPiece){
-    const gy=vsGhostY();
-    for(let r=0;r<vsPiece.shape.length;r++)for(let c=0;c<vsPiece.shape[r].length;c++)
-      if(vsPiece.shape[r][c])drawVsCell(pieceColors[vsPiece.key],vsPiece.x+c,gy+r,0.25);
-    const col2=vsLockFlashing&&!vsLockBright?darken(pieceColors[vsPiece.key]):pieceColors[vsPiece.key];
-    for(let r=0;r<vsPiece.shape.length;r++)for(let c=0;c<vsPiece.shape[r].length;c++)
-      if(vsPiece.shape[r][c])drawVsCell(col2,vsPiece.x+c,vsPiece.y+r);
-  }
-}
-function drawOppBoard(){
-  vsOppCtx.fillStyle='#0a0a0c';vsOppCtx.fillRect(0,0,vsOppEl.width,vsOppEl.height);
-  vsOppCtx.strokeStyle='rgba(255,255,255,0.04)';vsOppCtx.lineWidth=0.5;
-  for(let r=0;r<=ROWS;r++){vsOppCtx.beginPath();vsOppCtx.moveTo(0,r*VS_SZ);vsOppCtx.lineTo(COLS*VS_SZ,r*VS_SZ);vsOppCtx.stroke();}
-  for(let c=0;c<=COLS;c++){vsOppCtx.beginPath();vsOppCtx.moveTo(c*VS_SZ,0);vsOppCtx.lineTo(c*VS_SZ,ROWS*VS_SZ);vsOppCtx.stroke();}
-  if(oppGrid)for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(oppGrid[r][c])drawVsCell(oppGrid[r][c],c,r,1,vsOppCtx);
-}
 export function drawVsHold(){vsHoldCtx.fillStyle='#0a0a0c';vsHoldCtx.fillRect(0,0,vsHoldEl.width,vsHoldEl.height);drawMini(vsHoldCtx,vsHeldKey,vsHoldEl.width,vsHoldEl.height);}
 function buildVsPreviews(){
   const s=document.getElementById('vs-preview-stack');s.innerHTML='';

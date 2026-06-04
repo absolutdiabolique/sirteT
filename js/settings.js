@@ -2,7 +2,7 @@ import { cfg, keybinds, pieceColors, saveGlobal, keyLabel, resetKeybinds } from 
 import { DEFAULT_BINDS, ACTION_LABELS, PKEYS, RANKED_DEFAULTS, PRESETS } from './constants.js';
 import { showToast } from './ui.js';
 
-export let selectedMode = 'marathon', selectedSub = null;
+export let selectedMode = 'sprint', selectedSub = null;
 
 let listeningFor = null;
 
@@ -13,6 +13,14 @@ export function syncSettingsUI() {
   document.getElementById('g-arr-val').textContent = cfg.arr + 'ms';
   document.getElementById('g-sdf').value = cfg.sdf;
   document.getElementById('g-sdf-val').textContent = cfg.sdf === 41 ? '∞' : cfg.sdf + '×';
+  const ghostPct = Math.round(cfg.ghostOpacity * 100);
+  document.getElementById('s-ghost').value = ghostPct;
+  document.getElementById('s-ghost-val').textContent = ghostPct + '%';
+  document.getElementById('s-grid').value = cfg.gridOn ? '1' : '0';
+  document.getElementById('s-grid-sub').style.display = cfg.gridOn ? 'flex' : 'none';
+  document.getElementById('s-gw').value = cfg.gridWidth;
+  document.getElementById('s-gw-val').textContent = cfg.gridWidth + 'px';
+  document.getElementById('s-gc').value = cfg.gridColor;
 }
 
 export function updateHandlingSummary() {
@@ -74,6 +82,7 @@ export function buildPieceColorPickers() {
 export function resetSettings() {
   if (!confirm('Reset keybinds, DAS/ARR/SDF, and piece colors to defaults?')) return;
   cfg.das=167; cfg.arr=33; cfg.sdf=10;
+  cfg.ghostOpacity=0.30; cfg.gridOn=true; cfg.gridWidth=0.5; cfg.gridColor='#222233';
   resetKeybinds();
   Object.assign(pieceColors, {I:'#22d3ee',O:'#fde047',T:'#a855f7',S:'#4ade80',Z:'#f87171',J:'#60a5fa',L:'#fb923c'});
   syncSettingsUI(); buildKeybindTable(); buildPieceColorPickers(); saveGlobal();
@@ -81,9 +90,10 @@ export function resetSettings() {
 }
 
 export function selectMode(mode) {
+  if (!['sprint','blitz','zen'].includes(mode)) mode = 'sprint';
   selectedMode = mode;
   selectedSub = null;
-  ['marathon','sprint','blitz','zen'].forEach(m => {
+  ['sprint','blitz','zen'].forEach(m => {
     document.getElementById('mc-'+m).classList.toggle('active', m===mode);
   });
   document.getElementById('sprint-sub').style.display = mode==='sprint' ? 'block' : 'none';
@@ -156,11 +166,8 @@ export function readSetupCfg() {
   cfg.kicks       = document.getElementById('s-kicks').value;
   cfg.previewCount= parseInt(document.getElementById('s-preview').value);
   cfg.holdMode    = document.getElementById('s-hold').value;
-  cfg.ghostOpacity= parseInt(document.getElementById('s-ghost').value)/100;
-  cfg.gridOn      = document.getElementById('s-grid').value === '1';
-  cfg.gridWidth   = parseFloat(document.getElementById('s-gw').value);
-  cfg.gridColor   = document.getElementById('s-gc').value;
   cfg.invisibleLocked = document.getElementById('s-invisible').value === '1';
+  // ghostOpacity, gridOn, gridWidth, gridColor are global settings (managed in Settings screen)
   // das/arr/sdf come from cfg already (global settings)
 }
 
@@ -196,15 +203,10 @@ document.getElementById('g-sdf').oninput = function() {
   saveGlobal(); updateHandlingSummary();
 };
 
-// Setup screen slider labels
-['s-grav','s-preview','s-ghost','s-gw'].forEach(id => {
+// Setup screen slider labels (label-only)
+['s-grav','s-preview'].forEach(id => {
   const outId = id+'-val';
-  const fmts  = {
-    's-grav':    v => parseFloat(v).toFixed(1)+'×',
-    's-preview': v => v,
-    's-ghost':   v => v+'%',
-    's-gw':      v => parseFloat(v)+'px',
-  };
+  const fmts  = { 's-grav': v => parseFloat(v).toFixed(1)+'×', 's-preview': v => v };
   document.getElementById(id).oninput = function() {
     document.getElementById(outId).textContent = fmts[id](this.value);
   };
@@ -216,8 +218,26 @@ document.getElementById('s-practice').oninput = function() {
 document.getElementById('s-grav-mode').onchange = function() {
   document.getElementById('s-static-row').style.display = this.value==='static' ? 'flex' : 'none';
 };
+
+// Visual settings handlers (Settings screen — global, persisted)
+document.getElementById('s-ghost').oninput = function() {
+  cfg.ghostOpacity = parseInt(this.value) / 100;
+  document.getElementById('s-ghost-val').textContent = this.value + '%';
+  saveGlobal();
+};
+document.getElementById('s-gw').oninput = function() {
+  cfg.gridWidth = parseFloat(this.value);
+  document.getElementById('s-gw-val').textContent = parseFloat(this.value) + 'px';
+  saveGlobal();
+};
+document.getElementById('s-gc').oninput = function() {
+  cfg.gridColor = this.value;
+  saveGlobal();
+};
 document.getElementById('s-grid').onchange = function() {
-  document.getElementById('s-grid-sub').style.display = this.value==='1' ? 'flex' : 'none';
+  cfg.gridOn = this.value === '1';
+  document.getElementById('s-grid-sub').style.display = this.value === '1' ? 'flex' : 'none';
+  saveGlobal();
 };
 
 // Watch for setting changes that affect ranking

@@ -149,9 +149,21 @@ canvas#board{display:block;border:1px solid var(--border2);image-rendering:pixel
 .lobby-title{font-family:'Space Mono',monospace;font-size:20px;letter-spacing:0.1em;margin-bottom:8px;}
 .lobby-sub{font-size:11px;color:var(--muted);margin-bottom:24px;}
 .room-input-row{display:flex;gap:8px;}
-input[type=text]{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
+input[type=text],input[type=email],input[type=password]{background:var(--surface2);border:1px solid var(--border2);color:var(--text);
   font-family:'DM Mono',monospace;font-size:13px;padding:8px 12px;border-radius:4px;flex:1;outline:none;}
-input[type=text]:focus{border-color:var(--accent);}
+input[type=text]:focus,input[type=email]:focus,input[type=password]:focus{border-color:var(--accent);}
+input[type=email],input[type=password]{flex:unset;width:100%;margin-bottom:8px;}
+
+/* Auth / Account */
+.auth-error{font-size:11px;color:var(--danger);min-height:16px;margin-top:8px;}
+.auth-bar{display:flex;align-items:center;justify-content:space-between;
+  width:100%;max-width:640px;margin-bottom:16px;gap:10px;}
+.auth-bar-status{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.account-profile{display:flex;align-items:center;gap:14px;padding:16px 0 20px;}
+.account-avatar{width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.account-username{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;}
+.account-email{font-size:11px;color:var(--muted);margin-top:3px;}
 .room-divider{display:flex;align-items:center;gap:10px;margin:18px 0;font-size:11px;color:var(--muted);}
 .room-divider::before,.room-divider::after{content:'';flex:1;height:1px;background:var(--border);}
 .room-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px 20px;margin-bottom:10px;}
@@ -165,17 +177,32 @@ input[type=text]:focus{border-color:var(--accent);}
 .spectator-info{font-size:10px;color:var(--muted);margin-top:6px;}
 
 /* VS GAME */
-#screen-vs{padding:14px 10px;justify-content:flex-start;flex-direction:column;}
-.vs-header{display:flex;align-items:center;gap:14px;margin-bottom:10px;width:100%;}
+#screen-vs,#screen-bot{padding:14px 10px;justify-content:flex-start;flex-direction:column;}
 .vs-boards{display:flex;gap:12px;align-items:flex-start;}
+.vs-sidebar{display:flex;flex-direction:column;align-items:center;gap:16px;padding-top:20px;width:72px;flex-shrink:0;}
+.vs-sidebar-mode{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.15em;color:var(--muted);text-transform:uppercase;}
+.vs-sidebar-timer{font-family:'Space Mono',monospace;font-size:15px;}
 .vs-player-col{display:flex;flex-direction:column;align-items:center;gap:6px;}
 .vs-player-label{font-size:10px;color:var(--muted);letter-spacing:0.12em;}
 .vs-player-label.me{color:var(--accent);}
 .vs-board-wrap{position:relative;}
 canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;display:block;}
 #vs-overlay{position:absolute;inset:0;background:rgba(10,10,12,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;}
+#bot-overlay{position:absolute;inset:0;background:rgba(10,10,12,0.88);flex-direction:column;align-items:center;justify-content:center;gap:8px;}
 .garbage-bar{background:var(--surface2);border:1px solid var(--border);border-radius:3px;overflow:hidden;display:flex;flex-direction:column-reverse;width:8px;}
-.garbage-fill{width:100%;background:var(--danger);transition:height 0.2s;}
+.garbage-seg{width:100%;background:var(--danger);flex-shrink:0;}
+.garbage-seg-sep{width:100%;height:2px;background:rgba(0,0,0,0.55);flex-shrink:0;}
+
+/* CANCEL SPLASH */
+.cancel-splash{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) rotate(-12deg);
+  font-family:'Space Mono',monospace;font-size:80px;font-weight:700;
+  color:#67e8f9;-webkit-text-stroke:1px rgba(255,255,255,0.25);
+  text-align:center;white-space:pre;pointer-events:none;z-index:10;line-height:1.2;
+  opacity:1;transition:opacity 100ms linear;}
+.cancel-splash.fading{opacity:0;}
+.cancel-digit{display:inline-block;
+  animation:digitScale 200ms ease-out both;
+  animation-delay:var(--digit-delay,0ms);}
 
 /* In-game settings */
 #ingame-settings{position:fixed;top:0;right:-340px;width:320px;height:100vh;background:var(--surface);
@@ -189,21 +216,21 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 .close-btn:hover{color:var(--text);}
 
 /* SPLASH */
-.vs-splash{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) rotate(-12deg);
+.attack-splash{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) rotate(-12deg);
   font-family:'Space Mono',monospace;font-size:80px;font-weight:700;
-  color:#000;-webkit-text-stroke:2px #fff;
+  -webkit-text-stroke:2px #fff;color:#000;
   text-align:center;white-space:pre;pointer-events:none;z-index:10;line-height:1.2;
-  animation:splashFade 1.8s ease forwards,splashInvert 50ms steps(2,end) infinite;}
-.splash-char{display:inline-block;opacity:0;animation:splashCharPop 0.18s ease forwards;}
-@keyframes splashFade{
-  0%{opacity:1;}75%{opacity:1;}100%{opacity:0;}}
-@keyframes splashCharPop{
-  0%{opacity:0;transform:scale(0.4);}
-  60%{opacity:1;transform:scale(1.15);}
-  100%{opacity:1;transform:scale(1);}}
-@keyframes splashInvert{
-  0%,100%{filter:invert(0);}
-  50%{filter:invert(1);}}
+  opacity:1;transition:opacity 100ms linear;}
+.attack-splash.fading{opacity:0;}
+.attack-digit{display:inline-block;
+  animation-name:digitScale,digitColor;
+  animation-duration:200ms,200ms;
+  animation-timing-function:ease-out,steps(4,end);
+  animation-fill-mode:both,both;
+  animation-delay:var(--digit-delay,0ms),var(--digit-delay,0ms);}
+@keyframes digitScale{from{transform:scale(0.15);}to{transform:scale(1);}}
+@keyframes digitColor{
+  0%{color:#fff;}25%{color:#000;}50%{color:#fff;}75%{color:#000;}100%{color:#000;}}
 
 /* Line-clear side splash */
 @keyframes clearSplash{0%{opacity:1;letter-spacing:0.02em;}100%{opacity:0;letter-spacing:0.65em;}}
@@ -257,19 +284,25 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   <div class="menu-sub">A FALLING BLOCK GAME</div>
   <div class="menu-btns">
     <button class="menu-btn" onclick="showScreen('screen-setup')"><span>▶</span> Solo Play</button>
+    <button class="menu-btn" onclick="showScreen('screen-bot-setup')"><span>◎</span> vs Bot</button>
     <button class="menu-btn" onclick="showScreen('screen-lobby')"><span>⚡</span> Multiplayer</button>
     <button class="menu-btn" onclick="showScreen('screen-stats')"><span>◈</span> Stats</button>
     <button class="menu-btn" onclick="showScreen('screen-settings')"><span>⚙</span> Settings</button>
+    <button class="menu-btn" onclick="showScreen('screen-account')"><span>◉</span> Account</button>
   </div>
   <div class="menu-version">v5.0 — sirteT</div>
 </div>
 
 <!-- STATS -->
 <div id="screen-stats" class="screen">
-  <div class="setup-top" style="margin-bottom:20px;max-width:640px;">
+  <div class="setup-top" style="margin-bottom:12px;max-width:640px;">
     <button class="back-btn" onclick="showScreen('screen-menu')">← Back</button>
     <span class="screen-title">Statistics</span>
     <button class="back-btn" onclick="clearStats()" style="color:var(--danger);border-color:var(--danger);">Clear</button>
+  </div>
+  <div class="auth-bar">
+    <span class="auth-bar-status" id="auth-status">Sign in to sync PBs across devices</span>
+    <button class="btn" style="width:auto;white-space:nowrap;" onclick="showScreen('screen-account')">Account →</button>
   </div>
   <div style="width:100%;max-width:640px;">
     <div class="pb-history-title" style="margin-bottom:8px;">Sprint</div>
@@ -335,9 +368,21 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         <table class="keybind-table" id="keybind-table"></table>
       </div>
     </div>
-    <div class="setup-col-narrow">
+    <div class="setup-col">
       <div class="settings-group">
-        <div class="settings-group-title">Piece Colors</div>
+        <div class="settings-group-title">Visuals</div>
+        <div class="setting-row"><div class="setting-label">Ghost opacity <span id="s-ghost-val">30%</span></div>
+          <input type="range" id="s-ghost" min="0" max="80" step="5" value="30">
+        </div>
+        <div class="setting-row"><div class="setting-label">Grid lines</div>
+          <select id="s-grid"><option value="1">On</option><option value="0">Off</option></select>
+        </div>
+        <div class="setting-row" id="s-grid-sub" style="display:none;">
+          <div class="setting-label">Grid width <span id="s-gw-val">0.5px</span></div>
+          <input type="range" id="s-gw" min="0.5" max="3" step="0.5" value="0.5">
+        </div>
+        <div class="color-row"><span class="color-label">Grid color</span><input type="color" id="s-gc" value="#222233"></div>
+        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);margin:14px 0 8px;font-family:'Space Mono',monospace;border-bottom:1px solid var(--border);padding-bottom:5px;">Block Colors</div>
         <div class="piece-color-grid" id="piece-color-grid"></div>
       </div>
     </div>
@@ -354,10 +399,6 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
   <!-- MODE PICKER -->
   <div style="display:flex;gap:10px;margin-bottom:20px;width:100%;max-width:820px;">
-    <button class="mode-card" id="mc-marathon" onclick="selectMode('marathon')">
-      <div class="mode-card-name">Marathon</div>
-      <div class="mode-card-sub">Endless, rising gravity</div>
-    </button>
     <button class="mode-card" id="mc-sprint" onclick="selectMode('sprint')">
       <div class="mode-card-name">Sprint</div>
       <div class="mode-card-sub">Clear lines fast</div>
@@ -445,17 +486,6 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
       </div>
       <div class="settings-group">
         <div class="settings-group-title">Visuals</div>
-        <div class="setting-row"><div class="setting-label">Ghost opacity <span id="s-ghost-val">30%</span></div>
-          <input type="range" id="s-ghost" min="0" max="80" step="5" value="30">
-        </div>
-        <div class="setting-row"><div class="setting-label">Grid lines</div>
-          <select id="s-grid"><option value="1">On</option><option value="0">Off</option></select>
-        </div>
-        <div class="setting-row" id="s-grid-sub">
-          <div class="setting-label">Grid width <span id="s-gw-val">0.5px</span></div>
-          <input type="range" id="s-gw" min="0.5" max="3" step="0.5" value="0.5">
-        </div>
-        <div class="color-row"><span class="color-label">Grid color</span><input type="color" id="s-gc" value="#222233"></div>
         <div class="setting-row"><div class="setting-label">Invisible locked pieces</div>
           <select id="s-invisible"><option value="0">Off</option><option value="1">On</option></select>
         </div>
@@ -527,6 +557,116 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   </div>
 </div>
 
+<!-- BOT SETUP -->
+<div id="screen-bot-setup" class="screen">
+  <div class="setup-top" style="max-width:440px;">
+    <button class="back-btn" onclick="showScreen('screen-menu')">← Back</button>
+    <span class="screen-title">vs Bot</span>
+    <div></div>
+  </div>
+  <div style="width:100%;max-width:440px;">
+    <div class="settings-group">
+      <div class="settings-group-title">Bot Difficulty</div>
+      <div class="setting-row">
+        <div class="setting-label">Bot Speed <span id="bot-pps-val">1.50 PPS</span></div>
+        <input type="range" id="bot-pps-input" min="0.5" max="20.25" step="0.25" value="1.5"
+          oninput="const v=parseFloat(this.value);document.getElementById('bot-pps-val').textContent=v>20?'MAX':v.toFixed(2)+' PPS'">
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:-4px;">PPS = pieces per second. Drag past 20 for MAX (unlimited).</div>
+      <div class="setting-row" style="margin-top:10px;">
+        <div class="setting-label">AI Style</div>
+        <select id="bot-ai-select">
+          <option value="1">Diver Down</option>
+        </select>
+      </div>
+    </div>
+  </div>
+  <div class="setup-actions" style="max-width:440px;">
+    <button class="big-btn" onclick="showScreen('screen-menu')">Cancel</button>
+    <button class="big-btn primary" onclick="beginBotGame()">▶ Play</button>
+  </div>
+</div>
+
+<!-- BOT GAME -->
+<div id="screen-bot" class="screen">
+  <div class="vs-boards">
+    <div class="vs-sidebar">
+      <div class="vs-sidebar-mode">vs Bot</div>
+      <div id="bot-timer" class="vs-sidebar-timer">0:00</div>
+      <button class="btn" onclick="showScreen('screen-menu')" style="font-size:10px;color:var(--muted);padding:5px 8px;">Menu</button>
+    </div>
+    <!-- Player board -->
+    <div class="vs-player-col">
+      <div class="vs-player-label me" id="bot-my-label">You</div>
+      <div style="display:flex;gap:4px;align-items:flex-start;">
+        <div class="panel" style="padding:8px;">
+          <div class="panel-title" style="color:var(--accent);">Next</div>
+          <div id="bot-preview-stack" class="preview-stack"></div>
+        </div>
+        <div class="panel" style="padding:8px;width:88px;">
+          <div class="hold-label">Hold</div>
+          <canvas id="bot-hold-canvas" width="76" height="60"></canvas>
+        </div>
+        <div class="vs-board-wrap" id="bot-my-board-wrap">
+          <canvas id="bot-my-board" class="vs-board" width="280" height="560"></canvas>
+          <div id="bot-overlay" style="display:none;">
+            <h2 id="bot-overlay-title" style="font-family:'Space Mono',monospace;font-size:14px;">–</h2>
+            <div class="sub" id="bot-overlay-sub"></div>
+            <button id="bot-rematch-btn" class="big-btn primary" style="display:none;margin-top:10px;" onclick="botRematch()">▶ Play Again</button>
+          </div>
+          <div class="b2b-display side-left"></div>
+          <div class="combo-display side-left"></div>
+        </div>
+        <div>
+          <div class="garbage-bar" id="bot-garbage-bar" style="height:560px;"></div>
+        </div>
+      </div>
+      <div class="panel" style="padding:8px;margin-top:4px;width:100%;">
+        <div class="panel-title">Stats</div>
+        <div class="stat-row"><span class="stat-label">Lines</span><span class="stat-val" id="bot-my-lines">0</span></div>
+        <div class="stat-row"><span class="stat-label">Sent</span><span class="stat-val" id="bot-my-lines-sent">0</span></div>
+        <div class="stat-row"><span class="stat-label">Pieces</span><span class="stat-val" id="bot-my-pieces">0</span></div>
+        <div class="stat-row"><span class="stat-label">APM</span><span class="stat-val" id="bot-my-apm">0</span></div>
+        <div class="stat-row"><span class="stat-label">PPS</span><span class="stat-val" id="bot-my-pps">0</span></div>
+      </div>
+    </div>
+    <!-- VS divider -->
+    <div style="display:flex;align-items:center;padding-top:280px;">
+      <span style="font-family:'Space Mono',monospace;font-size:18px;color:var(--border2);">VS</span>
+    </div>
+    <!-- Bot board -->
+    <div class="vs-player-col">
+      <div class="vs-player-label" id="bot-opp-label">Bot</div>
+      <div style="display:flex;gap:4px;align-items:flex-start;">
+        <div class="panel" style="padding:8px;">
+          <div class="panel-title">Next</div>
+          <div id="bot-opp-preview-stack" class="preview-stack"></div>
+        </div>
+        <div class="panel" style="padding:8px;width:88px;">
+          <div class="hold-label">Hold</div>
+          <canvas id="bot-opp-hold-canvas" width="76" height="60"></canvas>
+        </div>
+        <div class="vs-board-wrap" id="bot-opp-board-wrap">
+          <canvas id="bot-opp-board" class="vs-board" width="280" height="560"></canvas>
+          <div class="b2b-display side-left"></div>
+          <div class="combo-display side-left"></div>
+        </div>
+        <div>
+          <div class="garbage-bar" id="bot-opp-garbage-bar" style="height:560px;"></div>
+        </div>
+      </div>
+      <div class="panel" style="padding:8px;margin-top:4px;width:100%;">
+        <div class="panel-title">Stats</div>
+        <div class="stat-row"><span class="stat-label">Lines</span><span class="stat-val" id="bot-opp-lines">0</span></div>
+        <div class="stat-row"><span class="stat-label">Sent</span><span class="stat-val" id="bot-opp-lines-sent">0</span></div>
+        <div class="stat-row"><span class="stat-label">Pieces</span><span class="stat-val" id="bot-opp-pieces">0</span></div>
+        <div class="stat-row"><span class="stat-label">APM</span><span class="stat-val" id="bot-opp-apm">0</span></div>
+        <div class="stat-row"><span class="stat-label">PPS</span><span class="stat-val" id="bot-opp-pps">0</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- LOBBY -->
 <div id="screen-lobby" class="screen">
   <div class="setup-top" style="max-width:440px;">
@@ -562,28 +702,23 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
 <!-- VS GAME -->
 <div id="screen-vs" class="screen">
-  <div class="vs-header">
-    <span class="game-header-title">sirte<span class="hi">T</span> — 1v1</span>
-    <span class="game-mode-badge">LIVE</span>
-    <span id="vs-timer" class="game-timer" style="margin-left:auto;">0:00</span>
-  </div>
   <div class="vs-boards">
-    <!-- My next -->
-    <div style="display:flex;flex-direction:column;gap:4px;padding-top:28px;">
-      <div class="panel" style="padding:8px;">
-        <div class="panel-title" style="color:var(--accent);">My Next</div>
-        <div id="vs-preview-stack" class="preview-stack"></div>
-      </div>
+    <div class="vs-sidebar">
+      <div class="vs-sidebar-mode">1v1</div>
+      <div id="vs-timer" class="vs-sidebar-timer">0:00</div>
+      <button class="btn" onclick="leaveRoom()" style="font-size:10px;color:var(--muted);padding:5px 8px;">Leave</button>
     </div>
     <!-- My board -->
     <div class="vs-player-col">
       <div class="vs-player-label me" id="vs-my-label">You</div>
       <div style="display:flex;gap:4px;align-items:flex-start;">
-        <div style="display:flex;flex-direction:column;gap:6px;padding-top:4px;">
-          <div class="panel" style="padding:8px;width:88px;">
-            <div class="hold-label">Hold</div>
-            <canvas id="vs-hold-canvas" width="76" height="60"></canvas>
-          </div>
+        <div class="panel" style="padding:8px;">
+          <div class="panel-title" style="color:var(--accent);">Next</div>
+          <div id="vs-preview-stack" class="preview-stack"></div>
+        </div>
+        <div class="panel" style="padding:8px;width:88px;">
+          <div class="hold-label">Hold</div>
+          <canvas id="vs-hold-canvas" width="76" height="60"></canvas>
         </div>
         <div class="vs-board-wrap" id="vs-my-board-wrap">
           <canvas id="vs-my-board" class="vs-board" width="280" height="560"></canvas>
@@ -595,16 +730,17 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
           <div class="b2b-display side-left"></div>
           <div class="combo-display side-left"></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px;padding-top:4px;">
-          <div class="garbage-bar" style="height:280px;">
-            <div class="garbage-fill" id="vs-garbage-fill" style="height:0%"></div>
-          </div>
+        <div>
+          <div class="garbage-bar" id="vs-garbage-bar" style="height:560px;"></div>
         </div>
       </div>
       <div class="panel" style="padding:8px;margin-top:4px;width:100%;">
         <div class="panel-title">Stats</div>
-        <div class="stat-row"><span class="stat-label">Score</span><span class="stat-val" id="vs-score">0</span></div>
         <div class="stat-row"><span class="stat-label">Lines</span><span class="stat-val" id="vs-lines">0</span></div>
+        <div class="stat-row"><span class="stat-label">Sent</span><span class="stat-val" id="vs-lines-sent">0</span></div>
+        <div class="stat-row"><span class="stat-label">Pieces</span><span class="stat-val" id="vs-pieces">0</span></div>
+        <div class="stat-row"><span class="stat-label">APM</span><span class="stat-val" id="vs-apm">0</span></div>
+        <div class="stat-row"><span class="stat-label">PPS</span><span class="stat-val" id="vs-pps">0</span></div>
       </div>
     </div>
     <!-- VS divider -->
@@ -614,22 +750,25 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <!-- Opp board -->
     <div class="vs-player-col">
       <div class="vs-player-label" id="vs-opp-label">Opponent</div>
-      <div class="vs-board-wrap" id="vs-opp-board-wrap">
-        <canvas id="vs-opp-board" class="vs-board" width="280" height="560"></canvas>
+      <div style="display:flex;gap:4px;align-items:flex-start;">
+        <div class="panel" style="padding:8px;">
+          <div class="panel-title">Next</div>
+          <div id="vs-opp-preview-stack" class="preview-stack"></div>
+        </div>
+        <div class="vs-board-wrap" id="vs-opp-board-wrap">
+          <canvas id="vs-opp-board" class="vs-board" width="280" height="560"></canvas>
+          <div class="b2b-display side-left"></div>
+          <div class="combo-display side-left"></div>
+        </div>
       </div>
       <div class="panel" style="padding:8px;margin-top:4px;width:100%;">
         <div class="panel-title">Stats</div>
-        <div class="stat-row"><span class="stat-label">Score</span><span class="stat-val" id="vs-opp-score">0</span></div>
         <div class="stat-row"><span class="stat-label">Lines</span><span class="stat-val" id="vs-opp-lines">0</span></div>
+        <div class="stat-row"><span class="stat-label">Sent</span><span class="stat-val" id="vs-opp-lines-sent">0</span></div>
+        <div class="stat-row"><span class="stat-label">Pieces</span><span class="stat-val" id="vs-opp-pieces">0</span></div>
+        <div class="stat-row"><span class="stat-label">APM</span><span class="stat-val" id="vs-opp-apm">0</span></div>
+        <div class="stat-row"><span class="stat-label">PPS</span><span class="stat-val" id="vs-opp-pps">0</span></div>
       </div>
-    </div>
-    <!-- Opp next -->
-    <div style="display:flex;flex-direction:column;gap:4px;padding-top:28px;">
-      <div class="panel" style="padding:8px;">
-        <div class="panel-title">Opp Next</div>
-        <div id="vs-opp-preview-stack" class="preview-stack"></div>
-      </div>
-      <button class="btn" onclick="leaveRoom()" style="font-size:10px;color:var(--muted);margin-top:4px;">Leave</button>
     </div>
   </div>
 </div>
@@ -642,6 +781,71 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 </div>
 
 <div id="toast"></div>
+
+<!-- ACCOUNT -->
+<div id="screen-account" class="screen">
+  <div class="setup-top" style="max-width:500px;">
+    <button class="back-btn" onclick="showScreen('screen-menu')">← Back</button>
+    <span class="screen-title">Account</span>
+    <div></div>
+  </div>
+
+  <!-- Guest (not signed in) -->
+  <div id="account-guest" style="width:100%;max-width:500px;">
+    <div class="settings-group">
+      <div class="settings-group-title">Sign In</div>
+      <input type="email" id="auth-email" placeholder="Email"
+        onkeydown="if(event.key==='Enter')document.getElementById('auth-password').focus()">
+      <input type="password" id="auth-password" placeholder="Password"
+        onkeydown="if(event.key==='Enter')doLogIn()">
+      <div class="auth-error" id="auth-error"></div>
+      <div class="btn-row" style="margin-top:4px;">
+        <button class="btn accent" onclick="doLogIn()">Sign In</button>
+        <button class="btn" onclick="doSignUp()">Create Account</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:12px;">
+        A random username is assigned on account creation. You can change it after signing in.
+      </div>
+    </div>
+  </div>
+
+  <!-- Signed-in user -->
+  <div id="account-user" style="display:none;width:100%;max-width:500px;">
+    <div class="settings-group">
+      <div class="settings-group-title">Profile</div>
+      <div class="account-profile">
+        <div class="account-avatar">◉</div>
+        <div>
+          <div class="account-username" id="account-username-display">—</div>
+          <div class="account-email"    id="account-email-display"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">Change Username</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="account-new-username" placeholder="New username" style="flex:1;margin-bottom:0;">
+        <button class="btn accent" style="width:auto;white-space:nowrap;" onclick="doChangeUsername()">Save</button>
+      </div>
+      <div class="auth-error" id="account-username-err"></div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title" style="color:var(--danger);border-color:rgba(245,101,101,0.3);">Danger Zone</div>
+      <div class="btn-row">
+        <button class="btn" style="color:var(--danger);border-color:var(--danger);" onclick="doDeleteData()">Delete Data</button>
+        <button class="btn" style="color:var(--danger);border-color:var(--danger);" onclick="doDeleteAccount()">Delete Account</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;">
+        <b style="color:var(--danger);">Delete Data</b> removes all cloud PBs and clears local stats.<br>
+        <b style="color:var(--danger);">Delete Account</b> permanently removes your account and all data.
+      </div>
+    </div>
+
+    <button class="btn" style="max-width:140px;" onclick="doLogOut()">Sign Out</button>
+  </div>
+</div>
 
 <script type="module" src="js/main.js"></script>
 </body>

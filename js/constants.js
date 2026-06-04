@@ -98,7 +98,6 @@ export const DEFAULT_BINDS = {
 export const RANKED_DEFAULTS = { gravMode:'leveled', kicks:'srs', holdMode:'normal' };
 
 export const PRESETS = {
-  marathon: {mode:'marathon',gravMode:'leveled',kicks:'srs',previewCount:5,holdMode:'normal',practice:false},
   sprint:   {mode:'sprint',  gravMode:'leveled',kicks:'srs',previewCount:5,holdMode:'normal',practice:false},
   blitz:    {mode:'blitz',   gravMode:'leveled',kicks:'srs',previewCount:5,holdMode:'normal',practice:false},
   zen:      {mode:'zen',     gravMode:'static',gravStatic:1,kicks:'srs',previewCount:5,holdMode:'infinite',practice:true},
