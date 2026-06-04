@@ -24,7 +24,7 @@ function showScreen(id) {
   if (id === 'screen-stats')   renderStats();
   if (id === 'screen-setup')   { updateHandlingSummary(); selectMode(selectedMode || 'sprint'); }
   if (id === 'screen-account') refreshAccountScreen();
-  if (id === 'screen-menu') {
+  if (id === 'screen-menu' || id === 'screen-menu-solo' || id === 'screen-menu-pvp' || id === 'screen-menu-config') {
     if (running) stopGame();
     if (vsRunning) stopVsGame();
     if (botRunning) stopBotGame();

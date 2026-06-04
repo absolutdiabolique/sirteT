@@ -283,14 +283,44 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   <div class="menu-logo">sirte<span class="hi">T</span></div>
   <div class="menu-sub">A FALLING BLOCK GAME</div>
   <div class="menu-btns">
-    <button class="menu-btn" onclick="showScreen('screen-setup')"><span>▶</span> Solo Play</button>
-    <button class="menu-btn" onclick="showScreen('screen-bot-setup')"><span>◎</span> vs Bot</button>
-    <button class="menu-btn" onclick="showScreen('screen-lobby')"><span>⚡</span> Multiplayer</button>
+    <button class="menu-btn" onclick="showScreen('screen-menu-solo')"><span>▶</span> Solo</button>
+    <button class="menu-btn" onclick="showScreen('screen-menu-pvp')"><span>⚡</span> PVP</button>
+    <button class="menu-btn" onclick="showScreen('screen-menu-config')"><span>⚙</span> Config</button>
     <button class="menu-btn" onclick="showScreen('screen-stats')"><span>◈</span> Stats</button>
-    <button class="menu-btn" onclick="showScreen('screen-settings')"><span>⚙</span> Settings</button>
-    <button class="menu-btn" onclick="showScreen('screen-account')"><span>◉</span> Account</button>
   </div>
   <div class="menu-version">v5.0 — sirteT</div>
+</div>
+
+<!-- MENU — SOLO -->
+<div id="screen-menu-solo" class="screen">
+  <div class="menu-logo">sirte<span class="hi">T</span></div>
+  <div class="menu-sub">SOLO</div>
+  <div class="menu-btns">
+    <button class="menu-btn" onclick="showScreen('screen-setup')"><span>▶</span> Solo Play</button>
+    <button class="menu-btn" onclick="showScreen('screen-bot-setup')"><span>◎</span> Bot</button>
+    <button class="menu-btn" style="color:var(--muted);border-color:var(--border);" onclick="showScreen('screen-menu')"><span>←</span> Back</button>
+  </div>
+</div>
+
+<!-- MENU — PVP -->
+<div id="screen-menu-pvp" class="screen">
+  <div class="menu-logo">sirte<span class="hi">T</span></div>
+  <div class="menu-sub">PVP</div>
+  <div class="menu-btns">
+    <button class="menu-btn" onclick="showScreen('screen-lobby')"><span>⚡</span> 1v1 Rooms</button>
+    <button class="menu-btn" style="color:var(--muted);border-color:var(--border);" onclick="showScreen('screen-menu')"><span>←</span> Back</button>
+  </div>
+</div>
+
+<!-- MENU — CONFIG -->
+<div id="screen-menu-config" class="screen">
+  <div class="menu-logo">sirte<span class="hi">T</span></div>
+  <div class="menu-sub">CONFIG</div>
+  <div class="menu-btns">
+    <button class="menu-btn" onclick="showScreen('screen-settings')"><span>⚙</span> General Settings</button>
+    <button class="menu-btn" onclick="showScreen('screen-account')"><span>◉</span> Account</button>
+    <button class="menu-btn" style="color:var(--muted);border-color:var(--border);" onclick="showScreen('screen-menu')"><span>←</span> Back</button>
+  </div>
 </div>
 
 <!-- STATS -->
