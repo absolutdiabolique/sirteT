@@ -3,9 +3,9 @@ PvP Tetris bot weight trainer — self-play (head-to-head simulation).
 Two bots with different weights play against each other.
 Fitness = win rate in round-robin tournament against population + hall of fame.
 
-Loads from weights2.json if it exists, otherwise falls back to weights.json,
+Loads from weights.json if it exists, otherwise falls back to weights.json,
 then to built-in defaults.
-Outputs: weights2.json
+Outputs: weights.json
 """
 
 import json
@@ -492,10 +492,10 @@ def mutate(w, sigma=0.15):
 # Self-play GA
 # ---------------------------------------------------------------------------
 
-def run_selfplay_ga(pop_size=40, generations=30, elite=4,
+def run_selfplay_ga(pop_size=40, generations=100, elite=4,
                     opponents_per_eval=4, games_per_match=2, seed_weights=None):
     base = seed_weights if seed_weights is not None else DEFAULT_WEIGHTS
-    src  = 'weights2.json' if seed_weights else 'defaults'
+    src  = 'weights.json' if seed_weights else 'defaults'
     print(f"Self-play GA  pop={pop_size}  gens={generations}  (seed: {src})")
     print(f"Each individual: {opponents_per_eval} opponents × {games_per_match*2} games")
 
@@ -557,7 +557,7 @@ def run_selfplay_cmaes(sigma0=0.3, maxiter=60, games_per_eval=6, seed_weights=No
     then promote the winner and repeat. Three rounds total.
     """
     base = seed_weights if seed_weights is not None else DEFAULT_WEIGHTS
-    src  = 'weights2.json' if seed_weights else 'defaults'
+    src  = 'weights.json' if seed_weights else 'defaults'
     print(f"Self-play CMA-ES  (seed: {src})")
 
     opponent  = copy.deepcopy(base)
@@ -609,13 +609,13 @@ def run_selfplay_cmaes(sigma0=0.3, maxiter=60, games_per_eval=6, seed_weights=No
 # Load / save
 # ---------------------------------------------------------------------------
 
-OUTPUT_FILE  = os.path.join(os.path.dirname(__file__), 'weights2.json')
+OUTPUT_FILE  = os.path.join(os.path.dirname(__file__), 'weights.json')
 FALLBACK_FILE = os.path.join(os.path.dirname(__file__), 'weights.json')
 
 
 def load_weights():
     """
-    Try weights2.json first, then weights.json as fallback.
+    Try weights.json first, then weights.json as fallback.
     Returns (weights_dict, fitness_or_None) or (None, None).
     """
     for path in (OUTPUT_FILE, FALLBACK_FILE):

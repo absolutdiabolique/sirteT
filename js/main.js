@@ -17,6 +17,13 @@ import { vsRunning, vsRunLoop, vsPiece, stopVsGame, createRoom, joinRoom,
 import { botRunning, botRunLoop, botPiece, startBotGame, stopBotGame, botRematchGame,
   botStartDAS, botStopDAS, botStartSD, botStopSD,
   botTryRotate, botTryRotate180, botHardDrop, botDoHold } from './bot.js';
+import { qpRunning, qpPiece, startQpGame, stopQpGame,
+  qpStartDAS, qpStopDAS, qpStartSD, qpStopSD,
+  qpTryRotate, qpTryRotate180, qpHardDrop, qpDoHold } from './qp.js';
+import { mrRunning, mrPiece, stopMrGame, leaveMrRoom,
+  createMrRoom, joinMrRoom, startMrGameFromHost, onMrSettingChange,
+  mrStartDAS, mrStopDAS, mrStartSD, mrStopSD,
+  mrTryRotate, mrTryRotate180, mrHardDrop, mrDoHold } from './mr.js';
 
 // Full showScreen with side effects
 function showScreen(id) {
@@ -28,6 +35,8 @@ function showScreen(id) {
     if (running) stopGame();
     if (vsRunning) stopVsGame();
     if (botRunning) stopBotGame();
+    if (qpRunning) stopQpGame();
+    if (mrRunning) stopMrGame();
   }
 }
 
@@ -52,6 +61,18 @@ window.startVsGame   = startVsGame;
 window.leaveRoom     = leaveRoom;
 window.vsRematch     = rematchGame;
 window.botRematch    = botRematchGame;
+window.beginQpGame   = () => {
+  if (!currentUser()) { showToast('Sign in to play Quick Play'); showScreen('screen-account'); return; }
+  showScreen('screen-qp');
+  startQpGame();
+};
+window.leaveQpGame   = () => { stopQpGame(); showScreen('screen-menu'); };
+window.createMrRoom          = createMrRoom;
+window.joinMrRoom            = joinMrRoom;
+window.startMrGameFromHost   = startMrGameFromHost;
+window.onMrSettingChange     = onMrSettingChange;
+window.leaveMrRoom           = leaveMrRoom;
+window.leaveMrGame           = leaveMrRoom;
 window.clearStats    = () => { if(confirm('Clear all stats?')) { localStorage.removeItem('sirtet_stats'); renderStats(); } };
 
 // ── Account screen ────────────────────────────────────────────
@@ -179,6 +200,7 @@ document.addEventListener('keydown', e => {
   const onGame = document.getElementById('screen-game').classList.contains('active');
   const onVs   = document.getElementById('screen-vs').classList.contains('active');
   const onBot  = document.getElementById('screen-bot').classList.contains('active');
+  const onQp   = document.getElementById('screen-qp').classList.contains('active');
 
   if (onGame) {
     if (!running && checkBind(e,'hardDrop')) { startGame(); return; }
@@ -213,12 +235,34 @@ document.addEventListener('keydown', e => {
     if (checkBind(e,'moveLeft'))   { botStartDAS(-1);     return; }
     if (checkBind(e,'moveRight'))  { botStartDAS(1);      return; }
   }
+  if (onQp && qpRunning && qpPiece) {
+    if (checkBind(e,'hardDrop'))   { qpHardDrop();       return; }
+    if (checkBind(e,'hold'))       { qpDoHold();         return; }
+    if (checkBind(e,'rotateCW'))   { qpTryRotate(false); return; }
+    if (checkBind(e,'rotateCCW'))  { qpTryRotate(true);  return; }
+    if (checkBind(e,'rotate180'))  { qpTryRotate180();   return; }
+    if (checkBind(e,'softDrop'))   { qpStartSD();        return; }
+    if (checkBind(e,'moveLeft'))   { qpStartDAS(-1);     return; }
+    if (checkBind(e,'moveRight'))  { qpStartDAS(1);      return; }
+  }
+  if (onMr && mrRunning && mrPiece) {
+    if (checkBind(e,'hardDrop'))   { mrHardDrop();       return; }
+    if (checkBind(e,'hold'))       { mrDoHold();         return; }
+    if (checkBind(e,'rotateCW'))   { mrTryRotate(false); return; }
+    if (checkBind(e,'rotateCCW'))  { mrTryRotate(true);  return; }
+    if (checkBind(e,'rotate180'))  { mrTryRotate180();   return; }
+    if (checkBind(e,'softDrop'))   { mrStartSD();        return; }
+    if (checkBind(e,'moveLeft'))   { mrStartDAS(-1);     return; }
+    if (checkBind(e,'moveRight'))  { mrStartDAS(1);      return; }
+  }
 }, { capture: true });
 
 document.addEventListener('keyup', e => {
   const onGame = document.getElementById('screen-game').classList.contains('active');
   const onVs   = document.getElementById('screen-vs').classList.contains('active');
   const onBot  = document.getElementById('screen-bot').classList.contains('active');
+  const onQp   = document.getElementById('screen-qp').classList.contains('active');
+  const onMr   = document.getElementById('screen-mr').classList.contains('active');
   if (onGame) {
     if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) stopDAS();
     if (checkBind(e,'softDrop')) stopSD();
@@ -230,6 +274,14 @@ document.addEventListener('keyup', e => {
   if (onBot) {
     if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) botStopDAS();
     if (checkBind(e,'softDrop')) botStopSD();
+  }
+  if (onQp) {
+    if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) qpStopDAS();
+    if (checkBind(e,'softDrop')) qpStopSD();
+  }
+  if (onMr) {
+    if (checkBind(e,'moveLeft')||checkBind(e,'moveRight')) mrStopDAS();
+    if (checkBind(e,'softDrop')) mrStopSD();
   }
 });
 

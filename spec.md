@@ -172,6 +172,9 @@ Player competes against a local AI opponent. See section 14.
 ### 1v1 Multiplayer
 Real-time match against another player over Firebase. See section 15.
 
+### Quick Play
+Always-open ranked free-for-all over Firebase. See section 16.
+
 ---
 
 ## 9. Ranked Play
@@ -343,7 +346,60 @@ Spectators see both boards updated in real time from Firebase. They cannot inter
 
 ---
 
-## 16. Settings
+## 16. Quick Play
+
+### Overview
+Quick Play is an always-open, ranked free-for-all mode played over Firebase. There is no room code or waiting lobby — joining puts the player immediately into the live game. Any number of players can be in the same session simultaneously, and new players can join at any time while others are already playing. **Requires a signed-in account.**
+
+### Session Structure
+- A single shared session exists globally at all times (`quickplay/players/` in Firebase).
+- Each player writes their own state to `quickplay/players/{uid}`. Entries older than 30 seconds are considered stale and are ignored by other clients.
+- Player entries are removed from Firebase on leave (`onDisconnect().remove()` ensures cleanup on browser crash or disconnect).
+
+### Scoring
+Score is a floating-point value that increases through four mechanisms:
+
+| Source | Points |
+|---|---|
+| Passive (time) | +0.1 per second |
+| Regular line cleared | +1.0 |
+| Garbage line cleared | +0.5 |
+| KO (opponent tops out due to your garbage) | +15 |
+
+There is no cap on score. Gravity uses the standard leveled formula (same as Marathon).
+
+### Attack Targeting
+When a player generates an attack (garbage lines), those lines are sent to a single target determined by score ranking:
+
+- **Normal case**: attack goes to the player with the score **immediately above** yours.
+- **Highest score**: if you have the top score, attack goes to the player **immediately below** you.
+- **No valid target** (you are the only active player, or all others are dead/stale): attack goes nowhere.
+
+Attack entries are written to `quickplay/attacks/{targetUid}/` (any authenticated user may write; only the target may read). Targets consume and remove each entry as they receive it.
+
+### Garbage Application
+Incoming garbage is queued and applied on each piece lock (one segment per lock), identical to the 1v1 multiplayer mechanic. No cancellation — incoming garbage cannot be offset by outgoing attack.
+
+### KO Detection
+When a player tops out, they write `killedBy: {uid}` to their own Firebase entry. All active clients monitor all player entries; upon seeing a `killedBy` equal to their own uid for a newly dead player, they award themselves +15 points. Each KO is tracked locally to prevent double-counting.
+
+### Board Layout
+The Quick Play screen has three columns:
+
+```
+[Sidebar] [Next preview | Hold | Board + splashes | Garbage bar] [Players panel]
+```
+
+- The **sidebar** (left) shows the mode label, current score, and the current target's username.
+- The **board area** (center) is the same layout as vs Bot / 1v1: preview, hold, board with splashes, and a garbage bar.
+- The **players panel** (right, 160px) lists all active players sorted by score descending. Dead players are faded. The current target has a red left border.
+
+### Death
+When a player tops out, an overlay appears on their board showing "YOU DIED" and their final score. The Firebase entry is updated with `alive: false` and `killedBy`. The player can leave using the Leave button; the loop continues rendering the frozen board in the background so they can watch the panel.
+
+---
+
+## 17. Settings
 
 All settings persist via `localStorage`.
 
@@ -372,7 +428,7 @@ When enabled:
 
 ---
 
-## 17. Stats
+## 18. Stats
 
 Only personal bests are saved (one record per sub-mode).
 
@@ -384,7 +440,7 @@ Only personal bests are saved (one record per sub-mode).
 Stats are displayed in a table showing all sub-modes side by side. Clearing stats removes all locally saved records.
 
 ### Cloud Sync
-When signed in to an account (see section 18), personal bests are synced to Firebase:
+When signed in to an account (see section 19), personal bests are synced to Firebase:
 - A new PB is uploaded immediately when it is set.
 - On sign-in, cloud PBs are merged with local records — the better value for each sub-mode wins.
 - Local PBs that are better than the cloud copy are uploaded during the merge.
@@ -392,7 +448,7 @@ When signed in to an account (see section 18), personal bests are synced to Fire
 
 ---
 
-## 18. Account System
+## 19. Account System
 
 ### Overview
 Players can create an account with an email and password. Accounts enable cross-device personal best sync and a persistent identity.
@@ -426,7 +482,7 @@ The Stats screen shows a status bar indicating whether the player is signed in (
 
 ---
 
-## 19. Technical Notes
+## 20. Technical Notes
 
 - **Framework**: Vanilla HTML/JS, no build step
 - **Rendering**: HTML5 Canvas (2D context)

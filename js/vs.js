@@ -1,7 +1,7 @@
 import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
-import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini } from './ui.js';
+import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini, showCountdown } from './ui.js';
 import { createBoard } from './board.js';
 import { db } from './firebase.js';
 import { ref, set, get, onValue, off, serverTimestamp, remove, update }
@@ -162,22 +162,28 @@ function initVsGame() {
   ['vs-opp-lines','vs-opp-lines-sent','vs-opp-pieces','vs-opp-apm','vs-opp-pps'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
   document.getElementById('vs-overlay').style.display='none';
   const _rb=document.getElementById('vs-rematch-btn');if(_rb)_rb.style.display='none';
-  vsEnsureQueue(); vsSpawnNext(); buildVsPreviews(); buildOppPreviews();
-  vsRunLoop=true; vsLastTime=performance.now();
-  cancelAnimationFrame(vsRafId);
-  vsRafId=requestAnimationFrame(vsLoop);
-  vsGameStartMs=performance.now();
-  if(vsTimerInterval) clearInterval(vsTimerInterval);
-  vsTimerInterval=setInterval(()=>{
-    const elapsed=performance.now()-vsGameStartMs;
-    const sec=elapsed/1000, min=sec/60;
-    document.getElementById('vs-timer').textContent=fmtTime(elapsed).slice(0,7);
-    document.getElementById('vs-lines').textContent=vsLines;
-    document.getElementById('vs-lines-sent').textContent=vsLinesSent;
-    document.getElementById('vs-pieces').textContent=vsPieces;
-    document.getElementById('vs-apm').textContent=min>0.1?(vsLinesSent/min).toFixed(1):'0';
-    document.getElementById('vs-pps').textContent=sec>1?(vsPieces/sec).toFixed(2):'0.00';
-  },500);
+  vsEnsureQueue(); buildVsPreviews(); buildOppPreviews();  // previews before spawn
+  vsRunLoop=false; cancelAnimationFrame(vsRafId);
+  // Draw empty boards with grid visible behind the countdown
+  myBoard.draw({ grid:vsGrid,  piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
+  oppBoard.draw({ grid:oppGrid, piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
+  showCountdown(['vs-my-board-wrap','vs-opp-board-wrap'], () => {
+    vsSpawnNext();        // first piece spawns when GO! fires
+    vsRunLoop=true; vsLastTime=performance.now();
+    vsGameStartMs=performance.now();
+    if(vsTimerInterval) clearInterval(vsTimerInterval);
+    vsTimerInterval=setInterval(()=>{
+      const elapsed=performance.now()-vsGameStartMs;
+      const sec=elapsed/1000, min=sec/60;
+      document.getElementById('vs-timer').textContent=fmtTime(elapsed).slice(0,7);
+      document.getElementById('vs-lines').textContent=vsLines;
+      document.getElementById('vs-lines-sent').textContent=vsLinesSent;
+      document.getElementById('vs-pieces').textContent=vsPieces;
+      document.getElementById('vs-apm').textContent=min>0.1?(vsLinesSent/min).toFixed(1):'0';
+      document.getElementById('vs-pps').textContent=sec>1?(vsPieces/sec).toFixed(2):'0.00';
+    },500);
+    vsRafId=requestAnimationFrame(vsLoop);
+  });
 }
 
 function vsEnsureQueue(){while(vsQueue.length<5)vsQueue.push(sharedSeq[vsSeqIdx++]);}

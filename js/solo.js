@@ -1,7 +1,7 @@
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
-import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showSplash, updateCounters, drawMini } from './ui.js';
+import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showSplash, updateCounters, drawMini, showCountdown } from './ui.js';
 import { createBoard } from './board.js';
 import { loadStats, saveStats, recordSprintTime, recordBlitzScore } from './stats.js';
 
@@ -314,26 +314,35 @@ export function startGame() {
   document.getElementById('practice-badge').style.display=cfg.practice?'inline':'none';
   document.getElementById('game-timer').textContent=cfg.mode==='blitz'?fmtTime(blitzDuration):'0:00.000';
   gameStartMs=sprintStartMs=performance.now();
-  soloEnsureQueue(); spawnNext(); buildPreviews(); drawHold();
-  running=true; paused=false;
+  soloEnsureQueue(); buildPreviews(); drawHold();   // previews show queue before spawn
+  running=false; paused=false;
   document.getElementById('overlay').style.display='none';
   const scoreLbl = document.getElementById('score-label');
   if (scoreLbl) scoreLbl.textContent = cfg.mode==='blitz' ? 'Lines Sent' : 'Score';
-  cancelAnimationFrame(rafId); lastTime=performance.now();
-  timerRunning=true;
-  if(timerInterval) clearInterval(timerInterval);
-  timerInterval=setInterval(()=>{
-    if(!timerRunning||paused) return;
-    blitzDuration = {'30s':30000,'1m':60000,'2m':120000}[cfg.subMode] || 120000;
-    if(cfg.mode==='blitz'){
-      const rem=Math.max(0,blitzDuration-(performance.now()-gameStartMs));
-      document.getElementById('game-timer').textContent=fmtTime(rem);
-      if(rem<=0) triggerGameOver();
-    } else {
-      document.getElementById('game-timer').textContent=fmtTime(performance.now()-sprintStartMs);
-    }
-  },33);
-  rafId=requestAnimationFrame(loop);
+  cancelAnimationFrame(rafId);
+  // Draw empty board with grid so it's visible behind the countdown
+  board.draw({ grid, piece:null, ghostY:null, lockFlashing:false, lockBright:true,
+    ghostOpacity:0, gridOn:true, gridColor:cfg.gridColor||'rgba(255,255,255,0.04)', gridWidth:cfg.gridWidth||0.5 });
+  showCountdown('board-wrap', () => {
+    spawnNext();          // first piece spawns when GO! fires
+    running=true;
+    gameStartMs=sprintStartMs=performance.now();
+    timerRunning=true;
+    if(timerInterval) clearInterval(timerInterval);
+    timerInterval=setInterval(()=>{
+      if(!timerRunning||paused) return;
+      blitzDuration = {'30s':30000,'1m':60000,'2m':120000}[cfg.subMode] || 120000;
+      if(cfg.mode==='blitz'){
+        const rem=Math.max(0,blitzDuration-(performance.now()-gameStartMs));
+        document.getElementById('game-timer').textContent=fmtTime(rem);
+        if(rem<=0) triggerGameOver();
+      } else {
+        document.getElementById('game-timer').textContent=fmtTime(performance.now()-sprintStartMs);
+      }
+    },33);
+    lastTime=performance.now();
+    rafId=requestAnimationFrame(loop);
+  });
   const st=loadStats(); st.gamesPlayed=(st.gamesPlayed||0)+1; saveStats(st);
 }
 

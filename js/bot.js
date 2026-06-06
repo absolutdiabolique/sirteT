@@ -2,9 +2,10 @@ import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
 import { computeBestMove as computeBestMove1 } from './ai.js';
+import { computeBestMove as computeBestMove2 } from './ai2.js';
 
 
-import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken } from './ui.js';
+import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken, showCountdown } from './ui.js';
 
 let computeBestMove = computeBestMove1;
 
@@ -137,7 +138,7 @@ function botClearLines() {
   for (let r = ROWS - 1; r >= 0; r--) {
     if (bGrid[r].every(c => c)) { bGrid.splice(r, 1); bGrid.unshift(Array(COLS).fill(null)); cleared++; r++; }
   }
-  if (cleared === 0) { bComboCount = 0; return 0; }
+  if (cleared === 0) { bComboCount = 0; updateCounters('bot-opp-board-wrap', 0, bB2bCount); return 0; }
   bScore += [0, 100, 300, 500, 800][Math.min(cleared, 4)] * bLevel;
   bLines += cleared; bLevel = Math.floor(bLines / 10) + 1;
   const hasColoredLeft = bGrid.some(row => row.some(c => c && c !== '#444455'));
@@ -154,6 +155,7 @@ function botClearLines() {
       showCancelSplash('bot-opp-board-wrap', cancelled);
       if (isB2B || isPerfect || isColoredClear) bB2bCount++; else bB2bCount = 0;
       bComboCount++;
+      updateCounters('bot-opp-board-wrap', bComboCount, bB2bCount);
       if (isPerfect || isColoredClear) showRainbowSplash('bot-opp-board-wrap', isPerfect ? 'PERFECT CLEAR' : 'COLORED CLEAR', 'left');
       else showSplash('bot-opp-board-wrap', ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'QUAD'][Math.min(cleared, 4)], null, false, 'left');
       return cleared;
@@ -167,6 +169,7 @@ function botClearLines() {
   const garbage = Math.floor(rawBase * (1 + 0.2 * bComboCount));
   if (isB2B || isPerfect || isColoredClear) bB2bCount++; else bB2bCount = 0;
   bComboCount++;
+  updateCounters('bot-opp-board-wrap', bComboCount, bB2bCount);
   if (garbage > 0) {
     bLinesSent += garbage;
     showAttackSplash('bot-opp-board-wrap', garbage, (total) => { pGarbageQueue.push(total); updateGarbageBar('bot-garbage-bar', pGarbageQueue); });
@@ -481,7 +484,7 @@ function scheduleBotMaxMove() {
 
 export function startBotGame(pps, aiVersion = 1) {
   _lastAiVersion = aiVersion;
-  computeBestMove = computeBestMove1;
+  computeBestMove = aiVersion === 2 ? computeBestMove2 : computeBestMove1;
   botPps = pps || 1.5;
 
   // Player init
@@ -515,40 +518,47 @@ export function startBotGame(pps, aiVersion = 1) {
   document.getElementById('bot-my-label').textContent  = 'You';
   document.getElementById('bot-opp-label').textContent = botPps > BOT_MAX_THRESHOLD ? 'Bot (MAX)' : `Bot (${botPps} PPS)`;
 
-  // Spawn first pieces
-  pEnsureQ(); pSpawnNext(); buildPlayerPreviews();
-  bEnsureQ(); botSpawnNext(); buildBotPreviews();
+  // Build previews from queue before spawning (so countdown shows upcoming pieces)
+  pEnsureQ(); buildPlayerPreviews();
+  bEnsureQ(); buildBotPreviews();
+  // Draw empty boards with grid visible behind countdown
+  drawGridLines(myCtx, myBoardEl);
+  drawGridLines(oppCtx, oppBoardEl);
 
-  // Start loops
-  botRunning = true; botRunLoop = true;
+  botRunning = true; botRunLoop = false;
   cancelAnimationFrame(rafId);
-  lastTime = performance.now();
-  rafId = requestAnimationFrame(gameLoop);
 
-  clearInterval(botMoveInterval); botMoveInterval = null;
-  if (botPps > BOT_MAX_THRESHOLD) {
-    setTimeout(scheduleBotMaxMove, 0);
-  } else {
-    botMoveInterval = setInterval(() => { if (botRunLoop) botDoMove(); }, Math.round(1000 / botPps));
-  }
+  showCountdown(['bot-my-board-wrap','bot-opp-board-wrap'], () => {
+    pSpawnNext(); botSpawnNext();   // pieces spawn when GO! fires
+    botRunLoop = true;
+    lastTime = performance.now();
+    rafId = requestAnimationFrame(gameLoop);
 
-  if (timerInterval) clearInterval(timerInterval);
-  gameStartMs = performance.now();
-  timerInterval = setInterval(() => {
-    const elapsed = performance.now() - gameStartMs;
-    const sec = elapsed / 1000, min = sec / 60;
-    document.getElementById('bot-timer').textContent = fmtTime(elapsed).slice(0, 7);
-    document.getElementById('bot-my-lines').textContent = pLines;
-    document.getElementById('bot-my-lines-sent').textContent = pLinesSent;
-    document.getElementById('bot-my-pieces').textContent = pPieces;
-    document.getElementById('bot-my-apm').textContent = min > 0.1 ? (pLinesSent / min).toFixed(1) : '0';
-    document.getElementById('bot-my-pps').textContent = sec > 1 ? (pPieces / sec).toFixed(2) : '0.00';
-    document.getElementById('bot-opp-lines').textContent = bLines;
-    document.getElementById('bot-opp-lines-sent').textContent = bLinesSent;
-    document.getElementById('bot-opp-pieces').textContent = bPieces;
-    document.getElementById('bot-opp-apm').textContent = min > 0.1 ? (bLinesSent / min).toFixed(1) : '0';
-    document.getElementById('bot-opp-pps').textContent = sec > 1 ? (bPieces / sec).toFixed(2) : '0.00';
-  }, 500);
+    clearInterval(botMoveInterval); botMoveInterval = null;
+    if (botPps > BOT_MAX_THRESHOLD) {
+      setTimeout(scheduleBotMaxMove, 0);
+    } else {
+      botMoveInterval = setInterval(() => { if (botRunLoop) botDoMove(); }, Math.round(1000 / botPps));
+    }
+
+    if (timerInterval) clearInterval(timerInterval);
+    gameStartMs = performance.now();
+    timerInterval = setInterval(() => {
+      const elapsed = performance.now() - gameStartMs;
+      const sec = elapsed / 1000, min = sec / 60;
+      document.getElementById('bot-timer').textContent = fmtTime(elapsed).slice(0, 7);
+      document.getElementById('bot-my-lines').textContent = pLines;
+      document.getElementById('bot-my-lines-sent').textContent = pLinesSent;
+      document.getElementById('bot-my-pieces').textContent = pPieces;
+      document.getElementById('bot-my-apm').textContent = min > 0.1 ? (pLinesSent / min).toFixed(1) : '0';
+      document.getElementById('bot-my-pps').textContent = sec > 1 ? (pPieces / sec).toFixed(2) : '0.00';
+      document.getElementById('bot-opp-lines').textContent = bLines;
+      document.getElementById('bot-opp-lines-sent').textContent = bLinesSent;
+      document.getElementById('bot-opp-pieces').textContent = bPieces;
+      document.getElementById('bot-opp-apm').textContent = min > 0.1 ? (bLinesSent / min).toFixed(1) : '0';
+      document.getElementById('bot-opp-pps').textContent = sec > 1 ? (bPieces / sec).toFixed(2) : '0.00';
+    }, 500);
+  });
 }
 
 export function stopBotGame() {

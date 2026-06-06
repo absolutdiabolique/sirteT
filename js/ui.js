@@ -194,6 +194,55 @@ export function showSplash(wrapId, label, pieceKey, spin, side='left') {
 }
 
 
+// Bloom: sharp source + an expanding ghost copy that fades and darkens over 1 s.
+// The ghost starts at the same size/position and scales outward (cdBloom keyframe),
+// simulating the outward bloom of a bright flash.
+function bloomHtml(content, baseStyle) {
+  return `<div style="position:relative;display:flex;align-items:center;justify-content:center;">
+    <div class="cd-bloom"><div style="${baseStyle}">${content}</div></div>
+    <div style="${baseStyle}">${content}</div>
+  </div>`;
+}
+
+// 3-2-1-GO! countdown on one or more board wraps (pass string or array of IDs).
+// Calls cb() after "GO!" — only if the first wrap's parent screen is still active.
+export function showCountdown(wrapIds, cb) {
+  const ids   = Array.isArray(wrapIds) ? wrapIds : [wrapIds];
+  const wraps = ids.map(id => document.getElementById(id)).filter(Boolean);
+  if (!wraps.length) { cb(); return; }
+
+  const st  = "font-family:'Space Mono',monospace;font-weight:700;line-height:1;text-align:center;";
+  const els = wraps.map(wrap => {
+    const el = document.createElement('div');
+    el.style.cssText = 'position:absolute;inset:0;z-index:60;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(10,10,12,0.72);pointer-events:none;';
+    wrap.appendChild(el);
+    return el;
+  });
+
+  const steps = [3, 2, 1, 'GO!'];
+  let i = 0;
+
+  function tick() {
+    const n  = steps[i++];
+    const go = n === 'GO!';
+    const html = go
+      ? bloomHtml('GO!', `${st}font-size:52px;letter-spacing:0.12em;color:var(--accent2);`)
+      : bloomHtml(String(n), `${st}font-size:88px;color:var(--accent);`);
+    els.forEach(el => el.innerHTML = html);
+    if (!go) {
+      setTimeout(tick, 850);
+    } else {
+      setTimeout(() => {
+        els.forEach(el => el.remove());
+        const screen = wraps[0].closest('.screen');
+        if (!screen || screen.classList.contains('active')) cb();
+      }, 450);
+    }
+  }
+  tick();
+}
+
 // Only the DOM part — no side effects
 export function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
