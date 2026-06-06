@@ -201,6 +201,7 @@ document.addEventListener('keydown', e => {
   const onVs   = document.getElementById('screen-vs').classList.contains('active');
   const onBot  = document.getElementById('screen-bot').classList.contains('active');
   const onQp   = document.getElementById('screen-qp').classList.contains('active');
+  const onMr   = document.getElementById('screen-mr').classList.contains('active');
 
   if (onGame) {
     if (!running && checkBind(e,'hardDrop')) { startGame(); return; }
