@@ -5,8 +5,10 @@ export const cfg = {
   gravMode:'leveled', gravStatic:1.0,
   das:167, arr:33, sdf:10,
   kicks:'srs', previewCount:5, holdMode:'normal',
-  ghostOpacity:0.30, gridOn:true, gridWidth:0.5, gridColor:'#222233',
-  invisibleLocked:false
+  ghostOpacity:0.30, gridOn:true, gridWidth:0.5, gridColor:'#222233', pieceOutline:false,
+  invisibleLocked:false,
+  colorShiftBpm:120, limboBpm:120, drunkBpm:120, circlesBpm:120,
+  colorShift:false, limbo:false, drunk:false, circles:false
 };
 
 export const keybinds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
@@ -30,7 +32,9 @@ export function checkBind(e, action) {
 export function saveGlobal() {
   localStorage.setItem('sirtet_global', JSON.stringify({
     das:cfg.das, arr:cfg.arr, sdf:cfg.sdf, keybinds, pieceColors,
-    ghostOpacity:cfg.ghostOpacity, gridOn:cfg.gridOn, gridWidth:cfg.gridWidth, gridColor:cfg.gridColor
+    ghostOpacity:cfg.ghostOpacity, gridOn:cfg.gridOn, gridWidth:cfg.gridWidth, gridColor:cfg.gridColor, pieceOutline:cfg.pieceOutline,
+    colorShiftBpm:cfg.colorShiftBpm, limboBpm:cfg.limboBpm, drunkBpm:cfg.drunkBpm, circlesBpm:cfg.circlesBpm,
+    colorShift:cfg.colorShift, limbo:cfg.limbo, drunk:cfg.drunk, circles:cfg.circles
   }));
 }
 
@@ -43,10 +47,21 @@ export function loadGlobal() {
     if (s.sdf !== undefined) cfg.sdf = s.sdf;
     if (s.keybinds)    Object.assign(keybinds, s.keybinds);
     if (s.pieceColors) Object.assign(pieceColors, s.pieceColors);
-    if (s.ghostOpacity !== undefined) cfg.ghostOpacity = s.ghostOpacity;
-    if (s.gridOn      !== undefined) cfg.gridOn      = s.gridOn;
-    if (s.gridWidth   !== undefined) cfg.gridWidth   = s.gridWidth;
-    if (s.gridColor   !== undefined) cfg.gridColor   = s.gridColor;
+    if (s.ghostOpacity  !== undefined) cfg.ghostOpacity  = s.ghostOpacity;
+    if (s.gridOn        !== undefined) cfg.gridOn        = s.gridOn;
+    if (s.gridWidth     !== undefined) cfg.gridWidth     = s.gridWidth;
+    if (s.gridColor     !== undefined) cfg.gridColor     = s.gridColor;
+    if (s.pieceOutline  !== undefined) cfg.pieceOutline  = s.pieceOutline;
+    // migrate legacy single stupidBpm → per-effect BPMs
+    const fallbackBpm = s.stupidBpm ?? 120;
+    if (s.colorShiftBpm !== undefined) cfg.colorShiftBpm = s.colorShiftBpm; else if (s.stupidBpm !== undefined) cfg.colorShiftBpm = fallbackBpm;
+    if (s.limboBpm      !== undefined) cfg.limboBpm      = s.limboBpm;      else if (s.stupidBpm !== undefined) cfg.limboBpm      = fallbackBpm;
+    if (s.drunkBpm      !== undefined) cfg.drunkBpm      = s.drunkBpm;      else if (s.stupidBpm !== undefined) cfg.drunkBpm      = fallbackBpm;
+    if (s.circlesBpm    !== undefined) cfg.circlesBpm    = s.circlesBpm;    else if (s.stupidBpm !== undefined) cfg.circlesBpm    = fallbackBpm;
+    if (s.colorShift  !== undefined) cfg.colorShift  = s.colorShift;
+    if (s.limbo       !== undefined) cfg.limbo       = s.limbo;
+    if (s.drunk       !== undefined) cfg.drunk       = s.drunk;
+    if (s.circles     !== undefined) cfg.circles     = s.circles;
   } catch(e) {}
 }
 

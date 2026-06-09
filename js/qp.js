@@ -1,7 +1,11 @@
 // Quick Play — always-open ranked free-for-all
-// Firebase paths:
-//   quickplay/players/{uid}         — own state (own uid write, all read)
-//   quickplay/attacks/{targetUid}/  — any auth user writes, only target reads & consumes
+// Socket events:
+//   qp:join       — register presence, starts receiving qp:players / qp:attack
+//   qp:syncBoard  — throttled board state broadcast
+//   qp:topOut     — mark as dead
+//   qp:leave      — remove presence
+//   qp:players    — all current players snapshot (server → client)
+//   qp:attack     — incoming garbage (server → client, consumed server-side)
 
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
@@ -11,21 +15,19 @@ import {
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
 import { createBoard } from './board.js';
-import { db } from './firebase.js';
 import { currentUser, currentUsername } from './account.js';
-import { ref, set, push, remove, onValue, onChildAdded, onDisconnect }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getSocket, sendAttack } from './api.js';
+import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 const QP_PREVIEW = 5;
-const QP_ROOT    = 'quickplay';
 
-// ── Canvas setup (module-level, elements always present) ──────────────────
+// ── Canvas setup ──────────────────────────────────────────────────────────────
 const qpBoardEl = document.getElementById('qp-board');
 const qpBrd     = createBoard(qpBoardEl, SZ);
 const qpHoldEl  = document.getElementById('qp-hold-canvas');
 const qpHoldCtx = qpHoldEl.getContext('2d');
 
-// ── Game state ────────────────────────────────────────────────────────────
+// ── Game state ────────────────────────────────────────────────────────────────
 export let qpRunning = false;
 export let qpPiece   = null;
 
@@ -38,18 +40,16 @@ let qpRafId, qpLastTime;
 let qpLockTimer = null, qpLockFlashTimer = null;
 let qpLockFlashing = false, qpLockBright = true, qpLockMoves = 0;
 
-// ── DAS / soft drop ───────────────────────────────────────────────────────
+// ── DAS / soft drop ───────────────────────────────────────────────────────────
 let qpDasTimer = null, qpDasInterval = null, qpDasDir = 0, qpDasHeld = false;
 let qpSdActive = false, qpSdInterval = null;
 
-// ── Firebase ──────────────────────────────────────────────────────────────
+// ── Player state ──────────────────────────────────────────────────────────────
 let qpMyUid = null, qpMyUsername = null;
-let qpMyRef = null;
-let qpPlayersUnsub = null, qpAttacksUnsub = null;
 let qpSyncPending = false;
 let otherPlayers = {};
 
-// ── Queue ─────────────────────────────────────────────────────────────────
+// ── Queue ─────────────────────────────────────────────────────────────────────
 function qpEnsureQueue() {
   while (qpBag.length < 14) fillBag(qpBag);
   while (qpQueue.length < QP_PREVIEW + 1) qpQueue.push(qpBag.shift());
@@ -61,11 +61,11 @@ function qpDequeue() {
   return k;
 }
 
-// ── Physics helpers ───────────────────────────────────────────────────────
+// ── Physics helpers ───────────────────────────────────────────────────────────
 function qpGrounded() { return qpPiece && collide(qpPiece.shape, qpPiece.x, qpPiece.y + 1, qpGrid); }
 function qpGhostY()   { let g = qpPiece.y; while (!collide(qpPiece.shape, qpPiece.x, g + 1, qpGrid)) g++; return g; }
 
-// ── Lock delay ────────────────────────────────────────────────────────────
+// ── Lock delay ────────────────────────────────────────────────────────────────
 function qpSchedLock(isReset = false) {
   if (isReset && qpLockMoves >= 15) return;
   if (isReset) qpLockMoves++;
@@ -85,7 +85,7 @@ function qpOnMove() {
   else qpCancelLock(true);
 }
 
-// ── Rotation ──────────────────────────────────────────────────────────────
+// ── Rotation ──────────────────────────────────────────────────────────────────
 export function qpTryRotate(ccw = false) {
   if (!qpRunning || !qpPiece || !qpAlive) return;
   const nr  = ((qpPiece.rot + (ccw ? -1 : 1)) + 4) % 4;
@@ -114,7 +114,7 @@ export function qpTryRotate180() {
   }
 }
 
-// ── Hold ──────────────────────────────────────────────────────────────────
+// ── Hold ──────────────────────────────────────────────────────────────────────
 export function qpDoHold() {
   if (!qpRunning || !qpAlive) return;
   if (cfg.holdMode === 'none') return;
@@ -130,7 +130,7 @@ export function qpDoHold() {
   qpHoldUsed = true; qpDrawHold();
 }
 
-// ── Hard drop ─────────────────────────────────────────────────────────────
+// ── Hard drop ─────────────────────────────────────────────────────────────────
 export function qpHardDrop() {
   if (!qpRunning || !qpPiece || !qpAlive) return;
   qpCancelLock();
@@ -138,21 +138,21 @@ export function qpHardDrop() {
   qpDoLock();
 }
 
-// ── Spin detection ────────────────────────────────────────────────────────
+// ── Spin detection ────────────────────────────────────────────────────────────
 function qpIsSpin() {
   return collide(qpPiece.shape, qpPiece.x - 1, qpPiece.y,     qpGrid) &&
          collide(qpPiece.shape, qpPiece.x + 1, qpPiece.y,     qpGrid) &&
          collide(qpPiece.shape, qpPiece.x,     qpPiece.y - 1, qpGrid);
 }
 
-// ── Attack calculation ────────────────────────────────────────────────────
+// ── Attack calculation ────────────────────────────────────────────────────────
 function qpBaseAtk(n, spin) { return spin ? [0,2,4,7][Math.min(n,3)] : [0,0.5,1,2,4][Math.min(n,4)]; }
 function qpB2bBonus(b) {
   if (b<=2) return 0; if (b<=5) return 1; if (b<=10) return 2;
   if (b<=20) return 3; if (b<=50) return 4; if (b<=100) return 5; return 6;
 }
 
-// ── Clear lines ───────────────────────────────────────────────────────────
+// ── Clear lines ───────────────────────────────────────────────────────────────
 function qpClearLines(spin, key) {
   let reg = 0, garb = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
@@ -163,8 +163,6 @@ function qpClearLines(spin, key) {
     }
   }
   const total = reg + garb;
-
-  // QP scoring: +1 per regular line, +0.5 per garbage line cleared
   qpScore += reg * 1 + garb * 0.5;
 
   if (total === 0) {
@@ -201,7 +199,7 @@ function qpClearLines(spin, key) {
   showSplash('qp-board-wrap', lbl, key, spin, 'left');
 }
 
-// ── Lock ──────────────────────────────────────────────────────────────────
+// ── Lock ──────────────────────────────────────────────────────────────────────
 function qpDoLock() {
   const spin = qpIsSpin(), lockedKey = qpPiece.key;
   for (let r = 0; r < qpPiece.shape.length; r++) {
@@ -218,7 +216,7 @@ function qpDoLock() {
   qpHoldUsed = false;
 }
 
-// ── Garbage application ───────────────────────────────────────────────────
+// ── Garbage ───────────────────────────────────────────────────────────────────
 function qpApplyGarbage() {
   if (!qpGarbage.length) return;
   const seg  = qpGarbage.shift();
@@ -232,7 +230,7 @@ function qpApplyGarbage() {
   updateGarbageBar('qp-garbage-bar', qpGarbage.map(g => g.lines));
 }
 
-// ── Spawn ─────────────────────────────────────────────────────────────────
+// ── Spawn ─────────────────────────────────────────────────────────────────────
 function qpSpawnNext() {
   qpPiece = mkPiece(qpDequeue());
   qpDropAcc = 0; qpLockMoves = 0;
@@ -242,14 +240,15 @@ function qpSpawnNext() {
   schedQpSync();
 }
 
-// ── Top out ───────────────────────────────────────────────────────────────
+// ── Top out ───────────────────────────────────────────────────────────────────
 function qpTopOut() {
   qpAlive = false;
   const ov = document.getElementById('qp-dead-overlay');
   ov.style.display = 'flex';
   document.getElementById('qp-dead-score').textContent = qpScore.toFixed(1);
-  if (qpMyRef) {
-    set(qpMyRef, {
+  const socket = getSocket();
+  if (socket) {
+    socket.emit('qp:topOut', {
       username: qpMyUsername,
       score: parseFloat(qpScore.toFixed(1)),
       alive: false,
@@ -259,42 +258,34 @@ function qpTopOut() {
   }
 }
 
-// ── Target calculation ────────────────────────────────────────────────────
+// ── Target calculation ────────────────────────────────────────────────────────
 function getQpTarget() {
   const now   = Date.now();
   const alive = Object.entries(otherPlayers)
     .filter(([, p]) => p.alive !== false && now - (p.lastSeen || 0) < 30000)
     .map(([uid, p]) => ({ uid, score: p.score || 0 }));
-
   if (!alive.length) return null;
-
-  const all = [...alive, { uid: qpMyUid, score: qpScore }]
-    .sort((a, b) => a.score - b.score);
-  const i = all.findIndex(p => p.uid === qpMyUid);
-
-  // Highest score → target player just below; otherwise → target player just above
-  return i === all.length - 1
-    ? (i > 0 ? all[i - 1].uid : null)
-    : all[i + 1].uid;
+  const all = [...alive, { uid: qpMyUid, score: qpScore }].sort((a, b) => a.score - b.score);
+  const i   = all.findIndex(p => p.uid === qpMyUid);
+  return i === all.length - 1 ? (i > 0 ? all[i-1].uid : null) : all[i+1].uid;
 }
 
-// ── Send attack ───────────────────────────────────────────────────────────
-async function sendQpAttack(lines) {
-  if (!db) return;
+function sendQpAttack(lines) {
   const target = getQpTarget();
   if (!target) return;
-  try { await push(ref(db, `${QP_ROOT}/attacks/${target}`), { from: qpMyUid, lines }); }
-  catch(e) {}
+  sendAttack({ mode: 'qp', lines, targetId: target });
 }
 
-// ── Firebase sync (throttled 100ms) ──────────────────────────────────────
+// ── Socket sync (throttled 100ms) ─────────────────────────────────────────────
 function schedQpSync() {
   if (qpSyncPending) return;
   qpSyncPending = true;
   setTimeout(() => {
     qpSyncPending = false;
-    if (!qpMyRef || !qpAlive) return;
-    set(qpMyRef, {
+    if (!qpAlive) return;
+    const socket = getSocket();
+    if (!socket) return;
+    socket.emit('qp:syncBoard', {
       username: qpMyUsername,
       score:    parseFloat(qpScore.toFixed(1)),
       alive:    true,
@@ -306,7 +297,7 @@ function schedQpSync() {
   }, 100);
 }
 
-// ── Players panel ─────────────────────────────────────────────────────────
+// ── Players panel ─────────────────────────────────────────────────────────────
 function updateQpPanel() {
   const el = document.getElementById('qp-players-list');
   if (!el) return;
@@ -326,7 +317,7 @@ function updateQpPanel() {
   }).join('') || '<div style="font-size:11px;color:var(--muted);padding:8px 6px;">No other players</div>';
 }
 
-// ── Draw helpers ──────────────────────────────────────────────────────────
+// ── Draw helpers ──────────────────────────────────────────────────────────────
 function qpDrawHold() {
   qpHoldCtx.globalAlpha = cfg.holdMode === 'none' ? 0.2 : 1;
   drawMini(qpHoldCtx, qpHeld, qpHoldEl.width, qpHoldEl.height);
@@ -342,17 +333,19 @@ function qpBuildPreviews() {
     c.width = 90; c.height = i === 0 ? 52 : 36; c.id = 'qp-prev-' + i;
     stack.appendChild(c);
   }
+  setupLimbo(stack, QP_PREVIEW);
   qpDrawPreviews();
 }
 
 function qpDrawPreviews() {
+  const q = limboQueue(qpQueue, QP_PREVIEW);
   for (let i = 0; i < QP_PREVIEW; i++) {
     const c = document.getElementById('qp-prev-' + i);
-    if (c) drawMini(c.getContext('2d'), qpQueue[i] || null, c.width, c.height);
+    if (c) drawMini(c.getContext('2d'), q[i] || null, c.width, c.height);
   }
 }
 
-// ── DAS / soft drop ───────────────────────────────────────────────────────
+// ── DAS / soft drop ───────────────────────────────────────────────────────────
 function qpMoveH(dx) {
   if (!qpRunning || !qpPiece || !qpAlive) return;
   if (!collide(qpPiece.shape, qpPiece.x + dx, qpPiece.y, qpGrid)) { qpPiece.x += dx; qpOnMove(); }
@@ -389,18 +382,16 @@ export function qpStartSD() {
 }
 export function qpStopSD() { qpSdActive = false; clearInterval(qpSdInterval); qpSdInterval = null; }
 
-// ── Game loop ─────────────────────────────────────────────────────────────
+// ── Game loop ─────────────────────────────────────────────────────────────────
 function qpLoop(ts) {
   if (!qpRunning) return;
   const dt = Math.min(ts - qpLastTime, 100);
   qpLastTime = ts;
 
   if (qpAlive) {
-    // Passive score: +0.1 per second
     qpScoreAccum += dt;
     while (qpScoreAccum >= 1000) { qpScore += 0.1; qpScoreAccum -= 1000; }
 
-    // Gravity (leveled)
     if (!qpGrounded()) {
       qpDropAcc += dt;
       const iv = Math.max(33, ((0.8-(qpLevel-1)*0.007)**(qpLevel-1))*1000);
@@ -408,12 +399,14 @@ function qpLoop(ts) {
     }
   }
 
+  const { circleGrid, circlePiece } = getCircleOffsets(ts);
   qpBrd.draw({
     grid: qpGrid, piece: qpAlive ? qpPiece : null,
     ghostY:      (qpAlive && qpPiece && cfg.ghostOpacity > 0) ? qpGhostY() : null,
     lockFlashing: qpLockFlashing, lockBright: qpLockBright,
     ghostOpacity: cfg.ghostOpacity,
     gridOn: cfg.gridOn, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth,
+    circleGrid, circlePiece,
   });
   qpDrawPreviews();
   qpDrawHold();
@@ -427,10 +420,12 @@ function qpLoop(ts) {
   qpRafId = requestAnimationFrame(qpLoop);
 }
 
-// ── Start ─────────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
 export function startQpGame() {
-  const user = currentUser();
-  if (!user || !db) { showToast('Sign in required'); return; }
+  const user   = currentUser();
+  const socket = getSocket();
+  if (!user) { showToast('Sign in required'); return; }
+  if (!socket) { showToast('Not connected'); return; }
 
   qpMyUid      = user.uid;
   qpMyUsername = currentUsername() || user.email;
@@ -450,21 +445,18 @@ export function startQpGame() {
   document.getElementById('qp-dead-overlay').style.display = 'none';
   document.getElementById('qp-players-list').innerHTML = '';
 
-  // Own presence in Firebase
-  qpMyRef = ref(db, `${QP_ROOT}/players/${qpMyUid}`);
-  onDisconnect(qpMyRef).remove();
+  // Remove stale listeners before re-joining
+  socket.off('qp:players');
+  socket.off('qp:attack');
 
-  // Listen to all players
-  if (qpPlayersUnsub) { qpPlayersUnsub(); qpPlayersUnsub = null; }
-  qpPlayersUnsub = onValue(ref(db, `${QP_ROOT}/players`), snap => {
-    const data = snap.val() || {};
-    const now  = Date.now();
+  // Listen for player list updates
+  socket.on('qp:players', data => {
+    const now = Date.now();
     otherPlayers = {};
     for (const [uid, p] of Object.entries(data)) {
       if (uid === qpMyUid) continue;
-      if (now - (p.lastSeen || 0) > 30000) continue; // skip stale
+      if (now - (p.lastSeen || 0) > 30000) continue;
       otherPlayers[uid] = p;
-      // KO bonus: +15 if someone died because of my garbage
       if (p.killedBy === qpMyUid && p.alive === false && !qpKoSet.has(uid)) {
         qpKoSet.add(uid);
         qpScore += 15;
@@ -474,38 +466,41 @@ export function startQpGame() {
   });
 
   // Listen for incoming attacks
-  if (qpAttacksUnsub) { qpAttacksUnsub(); qpAttacksUnsub = null; }
-  qpAttacksUnsub = onChildAdded(ref(db, `${QP_ROOT}/attacks/${qpMyUid}`), snap => {
-    const atk = snap.val();
-    if (!atk) return;
-    qpGarbage.push({ lines: atk.lines, from: atk.from });
+  socket.on('qp:attack', ({ from, lines }) => {
+    qpGarbage.push({ lines, from });
     updateGarbageBar('qp-garbage-bar', qpGarbage.map(g => g.lines));
-    remove(snap.ref); // consume immediately
+  });
+
+  // Tell server we're joining
+  socket.emit('qp:join', { uid: qpMyUid, username: qpMyUsername }, res => {
+    if (res?.error) showToast('QP join failed: ' + res.error);
   });
 
   qpEnsureQueue();
-  qpBuildPreviews();   // previews show queue before spawn
+  qpBuildPreviews();
   qpDrawHold();
-  // Draw empty board with gridlines visible behind countdown
   qpBrd.draw({ grid: qpGrid, piece: null, ghostY: null, lockFlashing: false, lockBright: true,
     ghostOpacity: 0, gridOn: true, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth });
 
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   showCountdown('qp-board-wrap', () => {
-    qpSpawnNext();      // first piece spawns when GO! fires
+    qpSpawnNext();
     qpRunning = true;
     qpLastTime = performance.now();
     qpRafId = requestAnimationFrame(qpLoop);
   });
 }
 
-// ── Stop / Leave ──────────────────────────────────────────────────────────
+// ── Stop / Leave ──────────────────────────────────────────────────────────────
 export function stopQpGame() {
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   qpCancelLock(); qpStopDAS(); qpStopSD();
-  if (qpPlayersUnsub) { qpPlayersUnsub(); qpPlayersUnsub = null; }
-  if (qpAttacksUnsub) { qpAttacksUnsub(); qpAttacksUnsub = null; }
-  if (qpMyRef) { remove(qpMyRef); qpMyRef = null; }
+  const socket = getSocket();
+  if (socket) {
+    socket.off('qp:players');
+    socket.off('qp:attack');
+    socket.emit('qp:leave');
+  }
 }

@@ -3,9 +3,8 @@ import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
 import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini, showCountdown } from './ui.js';
 import { createBoard } from './board.js';
-import { db } from './firebase.js';
-import { ref, set, get, onValue, off, serverTimestamp, remove, update }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getSocket, sendAttack } from './api.js';
+import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 // Canvas setup
 const vsBoardEl  = document.getElementById('vs-my-board');
@@ -28,7 +27,7 @@ let vsLockTimer=null, vsLockFlashTimer=null, vsLockFlashing=false, vsLockBright=
 let vsLockMoves=0;
 
 let myPlayerId=null, roomId=null, mySlot=null;
-let roomRef=null, roomListener=null;
+let roomListener=null; // socket.on('vs:room', ...) handler ref
 let currentGameId=null;
 let vsLinesSent=0, vsPieces=0, vsGameStartMs=0;
 
@@ -39,36 +38,38 @@ function genCode() { return Math.random().toString(36).slice(2,8).toUpperCase();
 function genId()   { return Math.random().toString(36).slice(2,10); }
 
 export async function createRoom() {
-  if(!db){showToast('Firebase not configured');return;}
-  myPlayerId=genId(); roomId=genCode();
-  const seed=Date.now()%2147483647;
-  await set(ref(db,`rooms/${roomId}`),{
-    bagSeed:seed, status:'waiting',
-    players:{[myPlayerId]:{slot:1,score:0,lines:0,board:null,queue:[],alive:true}}
+  const socket = getSocket();
+  if (!socket) { showToast('Not connected'); return; }
+  myPlayerId = genId();
+  const seed  = Date.now() % 2147483647;
+  return new Promise(resolve => {
+    socket.emit('vs:create', { playerId: myPlayerId, seed }, res => {
+      if (res?.error) { showToast(res.error); resolve(); return; }
+      roomId = res.roomId;
+      mySlot = 1;
+      showRoomCard();
+      listenRoom();
+      resolve();
+    });
   });
-  mySlot=1; showRoomCard(); listenRoom();
 }
 
 export async function joinRoom() {
-  if(!db){showToast('Firebase not configured');return;}
-  const code=document.getElementById('room-code-input').value.trim().toUpperCase();
-  if(!code){showToast('Enter a room code');return;}
-  const snap=await get(ref(db,`rooms/${code}`));
-  if(!snap.exists()){setLobbyStatus('Room not found.');return;}
-  const data=snap.val();
-  const players=data.players||{};
-  const count=Object.values(players).filter(p=>p&&p.slot).length;
-  myPlayerId=genId(); roomId=code;
-  const started=data.status==='playing'||data.status==='gameover';
-  if(!started&&count<2){
-    mySlot=2;
-    await update(ref(db,`rooms/${roomId}/players`),{[myPlayerId]:{slot:2,score:0,lines:0,board:null,queue:[],alive:true}});
-  } else {
-    mySlot=0;
-    await update(ref(db,`rooms/${roomId}/spectators`),{[myPlayerId]:true});
-    setLobbyStatus('Joined as spectator.');
-  }
-  showRoomCard(); listenRoom();
+  const socket = getSocket();
+  if (!socket) { showToast('Not connected'); return; }
+  const code = document.getElementById('room-code-input').value.trim().toUpperCase();
+  if (!code) { showToast('Enter a room code'); return; }
+  myPlayerId = genId();
+  return new Promise(resolve => {
+    socket.emit('vs:join', { code, playerId: myPlayerId }, res => {
+      if (res?.error) { setLobbyStatus(res.error); resolve(); return; }
+      roomId = res.roomId; mySlot = res.slot;
+      if (mySlot === 0) setLobbyStatus('Joined as spectator.');
+      showRoomCard();
+      listenRoom();
+      resolve();
+    });
+  });
 }
 
 function showRoomCard() {
@@ -79,55 +80,60 @@ function showRoomCard() {
 function setLobbyStatus(msg){document.getElementById('lobby-status').textContent=msg;}
 
 function listenRoom() {
-  if(roomListener) off(roomRef);
-  roomRef=ref(db,`rooms/${roomId}`);
-  roomListener=onValue(roomRef,snap=>{
-    if(!snap.exists()) return;
-    const data=snap.val();
-    const players=data.players||{};
-    const p1=Object.values(players).find(p=>p&&p.slot===1);
-    const p2=Object.values(players).find(p=>p&&p.slot===2);
-    const sl1=document.getElementById('slot-p1'),sl2=document.getElementById('slot-p2');
-    sl1.textContent='P1 — '+(p1?'ready':'waiting');
-    sl1.className='player-slot'+(p1?mySlot===1?' me':' filled':'');
-    sl2.textContent='P2 — '+(p2?'ready':'waiting');
-    sl2.className='player-slot'+(p2?mySlot===2?' me':' filled':'');
-    const specCount=Object.keys(data.spectators||{}).length;
-    document.getElementById('spectator-info').textContent=specCount?`+${specCount} spectator${specCount>1?'s':''}` :'';
-    const bothReady=p1&&p2;
-    document.getElementById('room-play-btn').style.display=bothReady&&mySlot===1?'block':'none';
-    document.getElementById('room-card-sub').textContent=bothReady?'Both players ready!':'Waiting for opponent...';
-    const newGameId=data.gameId||null;
-    if(data.status==='playing'){
-      if(!vsRunning){currentGameId=newGameId;enterVsGame(data,mySlot===0);}
-      else if(newGameId&&newGameId!==currentGameId){currentGameId=newGameId;handleRematch(data);}
+  const socket = getSocket();
+  if (!socket) return;
+  if (roomListener) { socket.off('vs:room', roomListener); roomListener = null; }
+  roomListener = ({ roomId: rid, data }) => {
+    if (rid !== roomId) return;
+    const players = data.players || {};
+    const p1 = Object.values(players).find(p => p && p.slot === 1);
+    const p2 = Object.values(players).find(p => p && p.slot === 2);
+    const sl1 = document.getElementById('slot-p1'), sl2 = document.getElementById('slot-p2');
+    sl1.textContent = 'P1 — ' + (p1 ? 'ready' : 'waiting');
+    sl1.className   = 'player-slot' + (p1 ? mySlot === 1 ? ' me' : ' filled' : '');
+    sl2.textContent = 'P2 — ' + (p2 ? 'ready' : 'waiting');
+    sl2.className   = 'player-slot' + (p2 ? mySlot === 2 ? ' me' : ' filled' : '');
+    const specCount = Object.keys(data.spectators || {}).length;
+    document.getElementById('spectator-info').textContent = specCount ? `+${specCount} spectator${specCount>1?'s':''}` : '';
+    const bothReady = p1 && p2;
+    document.getElementById('room-play-btn').style.display = bothReady && mySlot === 1 ? 'block' : 'none';
+    document.getElementById('room-card-sub').textContent   = bothReady ? 'Both players ready!' : 'Waiting for opponent...';
+    const newGameId = data.gameId || null;
+    if (data.status === 'playing') {
+      if (!vsRunning) { currentGameId = newGameId; enterVsGame(data, mySlot === 0); }
+      else if (newGameId && newGameId !== currentGameId) { currentGameId = newGameId; handleRematch(data); }
     }
-    if(vsRunning) updateOppBoard(data);
-  });
+    if (vsRunning) updateOppBoard(data);
+  };
+  socket.on('vs:room', roomListener);
+  socket.emit('vs:subscribe', { roomId });
 }
 
-export async function startVsGame(){
-  const gameId=genCode();
-  await update(ref(db,`rooms/${roomId}`),{status:'playing',gameId,startTime:serverTimestamp()});
+export function startVsGame() {
+  const socket = getSocket();
+  if (!socket || !roomId) return;
+  const gameId = genCode();
+  socket.emit('vs:startGame', { roomId, gameId });
 }
 
-export async function rematchGame(){
-  if(!db||!roomId||!myPlayerId)return;
-  const seed=Date.now()%2147483647;
-  const gameId=genCode();
-  await set(ref(db,`rooms/${roomId}/garbage`),null);
-  await update(ref(db,`rooms/${roomId}`),{bagSeed:seed,gameId,status:'playing',startTime:serverTimestamp()});
+export function rematchGame() {
+  const socket = getSocket();
+  if (!socket || !roomId || !myPlayerId) return;
+  const seed   = Date.now() % 2147483647;
+  const gameId = genCode();
+  socket.emit('vs:rematch', { roomId, seed, gameId });
 }
 
-function handleRematch(data){
+function handleRematch(data) {
   vsCancelLock();
-  sharedSeq=buildSharedSeq(data.bagSeed||12345); vsSeqIdx=0;
-  if(db&&roomId&&myPlayerId)
-    update(ref(db,`rooms/${roomId}/players/${myPlayerId}`),{alive:true,score:0,lines:0,board:null,queue:[]});
+  sharedSeq = buildSharedSeq(data.bagSeed || 12345); vsSeqIdx = 0;
+  const socket = getSocket();
+  if (socket && roomId && myPlayerId)
+    socket.emit('vs:resetPlayer', { roomId, playerId: myPlayerId });
   initVsGame();
 }
 
-function enterVsGame(data,spectate=false) {
+function enterVsGame(data, spectate=false) {
   vsSpectating=spectate; vsRunning=true;
   currentGameId=data.gameId||null;
   window.showScreen('screen-vs');
@@ -162,13 +168,12 @@ function initVsGame() {
   ['vs-opp-lines','vs-opp-lines-sent','vs-opp-pieces','vs-opp-apm','vs-opp-pps'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
   document.getElementById('vs-overlay').style.display='none';
   const _rb=document.getElementById('vs-rematch-btn');if(_rb)_rb.style.display='none';
-  vsEnsureQueue(); buildVsPreviews(); buildOppPreviews();  // previews before spawn
+  vsEnsureQueue(); buildVsPreviews(); buildOppPreviews();
   vsRunLoop=false; cancelAnimationFrame(vsRafId);
-  // Draw empty boards with grid visible behind the countdown
   myBoard.draw({ grid:vsGrid,  piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   oppBoard.draw({ grid:oppGrid, piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   showCountdown(['vs-my-board-wrap','vs-opp-board-wrap'], () => {
-    vsSpawnNext();        // first piece spawns when GO! fires
+    vsSpawnNext();
     vsRunLoop=true; vsLastTime=performance.now();
     vsGameStartMs=performance.now();
     if(vsTimerInterval) clearInterval(vsTimerInterval);
@@ -302,7 +307,6 @@ function vsClearLines(spin,pieceKey){
   const isColoredClear=!hasColoredLeft&&hasGarbageLeft;
   const isB2BEligible=cleared>=4||spin;
 
-  // Try to cancel incoming garbage first
   if(vsGarbageQueue.length>0){
     const cancelPow=getCancelPower(cleared,spin);
     const cancelled=applyCancel(vsGarbageQueue,cancelPow);
@@ -322,7 +326,6 @@ function vsClearLines(spin,pieceKey){
     }
   }
 
-  // Normal attack flow
   let rawBase;
   if(isPerfect){rawBase=10;}
   else if(isColoredClear){rawBase=5;}
@@ -334,9 +337,8 @@ function vsClearLines(spin,pieceKey){
   if(garbage>0){
     vsLinesSent+=garbage;
     showAttackSplash('vs-my-board-wrap',garbage,(total)=>{
-      if(!vsRunLoop)return;
-      if(!db||!roomId||!myPlayerId)return;
-      set(ref(db,`rooms/${roomId}/garbage/${Date.now()}`),{from:myPlayerId,lines:total});
+      if(!vsRunLoop||!roomId||!myPlayerId)return;
+      sendAttack({ mode:'vs', lines:total, roomId, senderId:myPlayerId });
     });
   }
   if(isPerfect||isColoredClear){
@@ -355,9 +357,11 @@ function addGarbage(g,n){
 function serializeGrid(g){return g.map(r=>r.map(c=>c?'1':'0').join('')).join('|');}
 function deserializeGrid(s){if(!s)return mkGrid();return s.split('|').map(r=>r.split('').map(c=>c==='1'?'#888899':null));}
 
-async function pushBoard(){
-  if(!db||!roomId||!myPlayerId)return;
-  await update(ref(db,`rooms/${roomId}/players/${myPlayerId}`),{
+function pushBoard(){
+  const socket = getSocket();
+  if(!socket||!roomId||!myPlayerId)return;
+  socket.emit('vs:syncBoard', {
+    roomId, playerId: myPlayerId,
     board:serializeGrid(vsGrid), score:vsScore, lines:vsLines, alive:true,
     queue:vsQueue.slice(0,3), linesSent:vsLinesSent, pieces:vsPieces
   });
@@ -404,16 +408,21 @@ function updateOppBoard(data){
   }
   const garb=data.garbage||{};
   let garbChanged=false;
+  const socket = getSocket();
   Object.entries(garb).forEach(([key,g])=>{
-    if(g.from!==myPlayerId){vsGarbageQueue.push(g.lines);garbChanged=true;remove(ref(db,`rooms/${roomId}/garbage/${key}`));}
+    if(g.from!==myPlayerId){
+      vsGarbageQueue.push(g.lines); garbChanged=true;
+      if(socket) socket.emit('vs:consumeGarbage',{roomId,key});
+    }
   });
   if(garbChanged) updateGarbageBar('vs-garbage-bar',vsGarbageQueue);
 }
 
-async function vsGameOver(){
+function vsGameOver(){
   vsRunLoop=false; vsCancelLock(); cancelAnimationFrame(vsRafId);
   if(vsTimerInterval){clearInterval(vsTimerInterval);vsTimerInterval=null;}
-  if(db&&roomId&&myPlayerId) await update(ref(db,`rooms/${roomId}/players/${myPlayerId}`),{alive:false});
+  const socket = getSocket();
+  if(socket&&roomId&&myPlayerId) socket.emit('vs:gameOver',{roomId,playerId:myPlayerId});
   document.getElementById('vs-overlay').style.display='flex';
   document.getElementById('vs-overlay-title').textContent='GAME OVER';
   document.getElementById('vs-overlay-sub').textContent='Opponent still going...';
@@ -431,13 +440,16 @@ function handleVsWin(){
 export function stopVsGame(){
   vsRunLoop=false; vsCancelLock(); cancelAnimationFrame(vsRafId);
   if(vsTimerInterval){clearInterval(vsTimerInterval);vsTimerInterval=null;}
-  if(roomRef&&roomListener)off(roomRef);
+  const socket = getSocket();
+  if(socket&&roomListener){ socket.off('vs:room',roomListener); roomListener=null; }
+  if(socket&&roomId) socket.emit('vs:unsubscribe',{roomId});
   vsRunning=false;
 }
 
 export async function leaveRoom(){
   stopVsGame();
-  if(db&&roomId&&myPlayerId) await update(ref(db,`rooms/${roomId}/players`),{[myPlayerId]:null}).catch(()=>{});
+  const socket = getSocket();
+  if(socket&&roomId&&myPlayerId) socket.emit('vs:leave',{roomId,playerId:myPlayerId});
   roomId=myPlayerId=mySlot=null;
   document.getElementById('room-card-wrap').style.display='none';
   document.getElementById('room-code-input').value='';
@@ -450,17 +462,19 @@ function vsLoop(ts){
   if(!vsRunLoop)return;
   const dt=Math.min(ts-vsLastTime,100);vsLastTime=ts;
   if(vsPiece&&!vsIsGrounded()){vsDropAcc+=dt;if(vsDropAcc>getVsInterval()){vsDropAcc=0;vsPiece.y++;vsOnMove();pushBoard();}}
+  const { circleGrid, circlePiece } = getCircleOffsets(ts);
   myBoard.draw({
     grid:vsGrid, piece:vsPiece,
     ghostY:vsPiece?vsGhostY():null,
     lockFlashing:vsLockFlashing, lockBright:vsLockBright,
     ghostOpacity:cfg.ghostOpacity, gridOn:true,
+    circleGrid, circlePiece,
   });
   oppBoard.draw({grid:oppGrid, gridOn:true});
   drawVsPreviews();drawOppPreviews();drawVsHold();
   vsRafId=requestAnimationFrame(vsLoop);
 }
-function vsSpectatorLoop(ts){
+function vsSpectatorLoop(){
   myBoard.draw({grid:vsGrid, gridOn:true});
   oppBoard.draw({grid:oppGrid, gridOn:true});
   drawVsPreviews();drawOppPreviews();
@@ -472,9 +486,10 @@ export function drawVsHold(){vsHoldCtx.fillStyle='#0a0a0c';vsHoldCtx.fillRect(0,
 function buildVsPreviews(){
   const s=document.getElementById('vs-preview-stack');s.innerHTML='';
   for(let i=0;i<3;i++){const c=document.createElement('canvas');c.width=70;c.height=i===0?44:32;c.id='vsp-'+i;s.appendChild(c);}
+  setupLimbo(s, 3);
   drawVsPreviews();
 }
-function drawVsPreviews(){for(let i=0;i<3;i++){const c=document.getElementById('vsp-'+i);if(c)drawMini(c.getContext('2d'),vsQueue[i]||null,c.width,c.height);}}
+function drawVsPreviews(){const q=limboQueue(vsQueue,3);for(let i=0;i<3;i++){const c=document.getElementById('vsp-'+i);if(c)drawMini(c.getContext('2d'),q[i]||null,c.width,c.height);}}
 function buildOppPreviews(){
   const s=document.getElementById('vs-opp-preview-stack');s.innerHTML='';
   for(let i=0;i<3;i++){const c=document.createElement('canvas');c.width=60;c.height=i===0?38:28;c.id='oppp-'+i;s.appendChild(c);}
@@ -482,11 +497,11 @@ function buildOppPreviews(){
 function drawOppPreviews(){for(let i=0;i<3;i++){const c=document.getElementById('oppp-'+i);if(c)drawMini(c.getContext('2d'),oppNextQueue[i]||null,c.width,c.height);}}
 
 // VS DAS
-let vsDasTimer=null,vsDasInterval=null,vsDasDir=0,vsDasHeld=false;
+let vsDasTimer=null,vsDasInterval=null,vsDasHeld=false;
 let vsSDActive=false,vsSDInterval=null;
 
 export function vsStartDAS(dx){
-  vsStopDAS();vsDasDir=dx;vsDasHeld=true;vsMoveH(dx);
+  vsStopDAS();vsDasHeld=true;vsMoveH(dx);
   vsDasTimer=setTimeout(()=>{
     if(!vsDasHeld)return;
     if(cfg.arr===0){let nx=vsPiece.x;while(!collide(vsPiece.shape,nx+dx,vsPiece.y,vsGrid))nx+=dx;vsPiece.x=nx;vsOnMove();pushBoard();}

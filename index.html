@@ -313,6 +313,8 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
   padding:1px 5px;border-radius:3px;flex-shrink:0;}
 .mr-you-tag{font-size:9px;letter-spacing:0.1em;border:1px solid var(--accent);color:var(--accent);
   padding:1px 5px;border-radius:3px;flex-shrink:0;}
+body.stupid-shift canvas{filter:hue-rotate(var(--hue-shift,0deg));}
+body.stupid-effect #board,body.stupid-effect #vs-my-board,body.stupid-effect #bot-my-board,body.stupid-effect #qp-board,body.stupid-effect #mr-board{transform:translateX(var(--stupid-tx,0px));}
 </style>
 </head>
 <body>
@@ -422,42 +424,76 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
     <span class="screen-title">Settings</span>
     <button class="back-btn" onclick="resetSettings()" style="color:var(--muted);">Reset Defaults</button>
   </div>
-  <div class="setup-layout" style="max-width:760px;width:100%;">
-    <div class="setup-col">
-      <div class="settings-group">
-        <div class="settings-group-title">Handling</div>
-        <div class="setting-row"><div class="setting-label">DAS — Delayed Auto Shift <span id="g-das-val">167ms</span></div>
-          <input type="range" id="g-das" min="0" max="500" step="1" value="167">
-        </div>
-        <div class="setting-row"><div class="setting-label">ARR — Auto Repeat Rate <span id="g-arr-val">33ms</span></div>
-          <input type="range" id="g-arr" min="0" max="200" step="1" value="33">
-        </div>
-        <div class="setting-row"><div class="setting-label">SDF — Soft Drop Factor <span id="g-sdf-val">10×</span></div>
-          <input type="range" id="g-sdf" min="1" max="41" step="1" value="10">
-        </div>
-      </div>
-      <div class="settings-group">
-        <div class="settings-group-title">Keybinds <span style="color:var(--muted);font-size:9px;">(click slot, then press key)</span></div>
-        <table class="keybind-table" id="keybind-table"></table>
-      </div>
+  <div class="settings-group" style="width:100%;max-width:760px;">
+    <div class="settings-group-title">Handling</div>
+    <div class="setting-row"><div class="setting-label">DAS — Delayed Auto Shift <span id="g-das-val">167ms</span></div>
+      <input type="range" id="g-das" min="0" max="500" step="1" value="167">
     </div>
-    <div class="setup-col">
-      <div class="settings-group">
-        <div class="settings-group-title">Visuals</div>
-        <div class="setting-row"><div class="setting-label">Ghost opacity <span id="s-ghost-val">30%</span></div>
-          <input type="range" id="s-ghost" min="0" max="80" step="5" value="30">
-        </div>
-        <div class="setting-row"><div class="setting-label">Grid lines</div>
-          <select id="s-grid"><option value="1">On</option><option value="0">Off</option></select>
-        </div>
-        <div class="setting-row" id="s-grid-sub" style="display:none;">
-          <div class="setting-label">Grid width <span id="s-gw-val">0.5px</span></div>
-          <input type="range" id="s-gw" min="0.5" max="3" step="0.5" value="0.5">
-        </div>
-        <div class="color-row"><span class="color-label">Grid color</span><input type="color" id="s-gc" value="#222233"></div>
-        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);margin:14px 0 8px;font-family:'Space Mono',monospace;border-bottom:1px solid var(--border);padding-bottom:5px;">Block Colors</div>
-        <div class="piece-color-grid" id="piece-color-grid"></div>
-      </div>
+    <div class="setting-row"><div class="setting-label">ARR — Auto Repeat Rate <span id="g-arr-val">33ms</span></div>
+      <input type="range" id="g-arr" min="0" max="200" step="1" value="33">
+    </div>
+    <div class="setting-row"><div class="setting-label">SDF — Soft Drop Factor <span id="g-sdf-val">10×</span></div>
+      <input type="range" id="g-sdf" min="1" max="41" step="1" value="10">
+    </div>
+  </div>
+  <div class="settings-group" style="width:100%;max-width:760px;">
+    <div class="settings-group-title">Keybinds <span style="color:var(--muted);font-size:9px;">(click slot, then press key)</span></div>
+    <table class="keybind-table" id="keybind-table"></table>
+  </div>
+  <div class="settings-group" style="width:100%;max-width:760px;">
+    <div class="settings-group-title">Visuals</div>
+    <div class="setting-row"><div class="setting-label">Ghost opacity <span id="s-ghost-val">30%</span></div>
+      <input type="range" id="s-ghost" min="0" max="80" step="5" value="30">
+    </div>
+    <div class="setting-row"><div class="setting-label">Piece outline</div>
+      <select id="s-piece-outline"><option value="0">Off</option><option value="1">On</option></select>
+    </div>
+    <div class="setting-row"><div class="setting-label">Grid lines</div>
+      <select id="s-grid"><option value="1">On</option><option value="0">Off</option></select>
+    </div>
+    <div class="setting-row" id="s-grid-sub" style="display:none;">
+      <div class="setting-label">Grid width <span id="s-gw-val">0.5px</span></div>
+      <input type="range" id="s-gw" min="0.5" max="3" step="0.5" value="0.5">
+    </div>
+    <div class="color-row"><span class="color-label">Grid color</span><input type="color" id="s-gc" value="#222233"></div>
+    <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);margin:14px 0 8px;font-family:'Space Mono',monospace;border-bottom:1px solid var(--border);padding-bottom:5px;">Block Colors</div>
+    <div class="piece-color-grid" id="piece-color-grid"></div>
+  </div>
+  <div class="settings-group" style="width:100%;max-width:760px;">
+    <div class="settings-group-title">Stupid</div>
+    <div class="setting-row" style="flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+      <span style="font-size:11px;color:var(--muted);">Apply BPM to all:</span>
+      <input type="number" id="s-apply-bpm" min="30" max="500" step="1" value="120"
+        style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:5px 8px;border-radius:4px;width:70px;outline:none;">
+      <button class="btn" onclick="applyBpmToAll()" style="padding:5px 12px;font-size:11px;">Apply to all</button>
+    </div>
+    <div class="setting-row" style="flex-direction:row;align-items:center;gap:12px;">
+      <div class="setting-label" style="width:120px;flex-shrink:0;margin:0;">Color Shifting</div>
+      <select id="s-color-shift"><option value="0">Off</option><option value="1">On</option></select>
+      <span style="font-size:11px;color:var(--muted);">BPM</span>
+      <input type="number" id="s-color-shift-bpm" min="30" max="500" step="1" value="120"
+        style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:5px 8px;border-radius:4px;width:70px;outline:none;">
+    </div>
+    <div class="setting-row" style="flex-direction:row;align-items:center;gap:12px;">
+      <div class="setting-label" style="width:120px;flex-shrink:0;margin:0;">Limbo</div>
+      <select id="s-limbo"><option value="0">Off</option><option value="1">On</option></select>
+      <span style="font-size:11px;color:var(--muted);">BPM</span>
+      <input type="number" id="s-limbo-bpm" min="30" max="500" step="1" value="120"
+        style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:5px 8px;border-radius:4px;width:70px;outline:none;">
+    </div>
+    <div class="setting-row" style="flex-direction:row;align-items:center;gap:12px;">
+      <div class="setting-label" style="width:120px;flex-shrink:0;margin:0;">Drunk</div>
+      <select id="s-drunk"><option value="0">Off</option><option value="1">On</option></select>
+      <span style="font-size:11px;color:var(--muted);">BPM</span>
+      <input type="number" id="s-drunk-bpm" min="30" max="500" step="1" value="120"
+        style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:5px 8px;border-radius:4px;width:70px;outline:none;">
+    </div>
+    <div class="setting-row" style="flex-direction:row;align-items:center;gap:12px;">
+      <div class="setting-label" style="width:120px;flex-shrink:0;margin:0;">Circles</div>
+      <select id="s-circles"><option value="0">Off</option><option value="1">On</option></select>
+      <span style="font-size:11px;color:var(--muted);">BPM</span>
+      <input type="number" id="s-circles-bpm" min="30" max="500" step="1" value="120"
+        style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:5px 8px;border-radius:4px;width:70px;outline:none;">
     </div>
   </div>
 </div>
@@ -1041,7 +1077,9 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 
   <!-- Guest (not signed in) -->
   <div id="account-guest" style="width:100%;max-width:500px;">
-    <div class="settings-group">
+
+    <!-- Step 1: email + password -->
+    <div id="auth-signin-form" class="settings-group">
       <div class="settings-group-title">Sign In</div>
       <input type="email" id="auth-email" placeholder="Email"
         onkeydown="if(event.key==='Enter')document.getElementById('auth-password').focus()">
@@ -1056,6 +1094,23 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
         A random username is assigned on account creation. You can change it after signing in.
       </div>
     </div>
+
+    <!-- Step 2: email verification code (shown after "Create Account") -->
+    <div id="auth-code-section" class="settings-group" style="display:none;">
+      <div class="settings-group-title">Verify Email</div>
+      <div id="auth-code-hint" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+      <input type="text" id="auth-code" placeholder="6-digit code"
+        maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+        onkeydown="if(event.key==='Enter')doVerifySignUp()">
+      <div class="auth-error" id="auth-code-error"></div>
+      <div class="btn-row" style="margin-top:4px;">
+        <button class="btn" onclick="doBackToLogin()">← Back</button>
+        <button class="btn accent" onclick="doVerifySignUp()">Verify &amp; Create Account</button>
+      </div>
+      <button class="btn" style="margin-top:8px;width:100%;font-size:11px;opacity:0.7;"
+        onclick="doResendCode()">Resend code</button>
+    </div>
+
   </div>
 
   <!-- Signed-in user -->

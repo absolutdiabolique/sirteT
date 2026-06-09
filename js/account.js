@@ -1,115 +1,148 @@
-import { auth, db } from './firebase.js';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  deleteUser,
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { ref, get, set, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { API_URL } from './config.js';
 import { loadStats, saveStats } from './stats.js';
 
-const ADJS  = ['Swift','Bold','Neon','Frost','Blaze','Storm','Iron','Void','Solar','Cyber',
-                'Dark','Hyper','Turbo','Pixel','Sonic','Rapid','Lunar','Hex','Prime','Ghost'];
-const NOUNS = ['Falcon','Nova','Pulse','Byte','Comet','Drift','Echo','Flux','Grid','Prism',
-                'Vortex','Shard','Quasar','Arc','Glitch','Stack','Apex','Core','Spike','Rift'];
+const STORAGE_KEY = 'sirtet_auth';
 
-function generateUsername() {
-  const a = ADJS[Math.floor(Math.random() * ADJS.length)];
-  const n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  const d = Math.floor(Math.random() * 9000) + 1000;
-  return `${a}${n}${d}`;
+function loadAuth()      { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } }
+function saveAuth(d)     { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+function clearAuth()     { localStorage.removeItem(STORAGE_KEY); }
+
+let _authData    = loadAuth(); // { idToken, refreshToken, uid, email, username, expiresAt }
+let _onChange    = null;       // (user, username) callback set by initAuth
+let _refreshTimer = null;
+
+export function currentUser()     { return _authData ? { uid: _authData.uid, email: _authData.email } : null; }
+export function currentUsername() { return _authData?.username ?? null; }
+
+// ── Token management ──────────────────────────────────────────────────────────
+async function _refreshToken() {
+  if (!_authData?.refreshToken) { clearAuth(); _authData = null; return; }
+  try {
+    const r = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: _authData.refreshToken }),
+    });
+    if (!r.ok) { clearAuth(); _authData = null; return; }
+    const d = await r.json();
+    _authData = { ..._authData, idToken: d.idToken, refreshToken: d.refreshToken, expiresAt: Date.now() + 3600000 };
+    saveAuth(_authData);
+  } catch { /* keep existing token */ }
 }
 
-let _user     = null;
-let _username = null;
+function _schedRefresh() {
+  if (_refreshTimer) clearTimeout(_refreshTimer);
+  if (!_authData?.expiresAt) return;
+  const delay = Math.max(0, _authData.expiresAt - Date.now() - 5 * 60 * 1000);
+  _refreshTimer = setTimeout(async () => { await _refreshToken(); _schedRefresh(); }, Math.min(delay, 55 * 60 * 1000));
+}
 
-export function currentUser()     { return _user; }
-export function currentUsername() { return _username; }
+export async function getIdToken() {
+  if (!_authData) return null;
+  if (!_authData.expiresAt || Date.now() >= _authData.expiresAt - 60000) await _refreshToken();
+  return _authData?.idToken ?? null;
+}
 
-export async function signUp(email, password) {
-  const cred     = await createUserWithEmailAndPassword(auth, email, password);
-  const username = generateUsername();
-  if (db) await set(ref(db, `users/${cred.user.uid}/username`), username);
-  return cred.user;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+async function _apiFetch(path, opts = {}) {
+  const token   = await getIdToken();
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const r    = await fetch(`${API_URL}${path}`, { ...opts, headers });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function _syncFromCloud() {
+  try {
+    const local = loadStats();
+    const d     = await _apiFetch('/api/user/sync-pbs', {
+      method: 'POST', body: JSON.stringify({ pbs: local }),
+    });
+    if (d.pbs) saveStats(d.pbs);
+  } catch(e) { console.warn('Cloud sync failed:', e.message); }
+}
+
+function _fire() { _onChange?.(currentUser(), _authData?.username ?? null); }
+
+// ── Public API ────────────────────────────────────────────────────────────────
+export async function sendVerificationCode(email) {
+  const r = await fetch(`${API_URL}/api/auth/send-code`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Failed to send code');
+}
+
+export async function signUp(email, password, code) {
+  const d    = await _apiFetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, code }) });
+  _authData  = { idToken: d.idToken, refreshToken: d.refreshToken, uid: d.uid, email: d.email, username: d.username, expiresAt: Date.now() + 3600000 };
+  saveAuth(_authData);
+  _schedRefresh();
+  await _syncFromCloud();
+  _fire();
 }
 
 export async function logIn(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
-  return cred.user;
+  const d    = await _apiFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+  _authData  = { idToken: d.idToken, refreshToken: d.refreshToken, uid: d.uid, email: d.email, username: d.username, expiresAt: Date.now() + 3600000 };
+  saveAuth(_authData);
+  _schedRefresh();
+  await _syncFromCloud();
+  _fire();
 }
 
-export function logOut() { return signOut(auth); }
+export function logOut() {
+  clearAuth();
+  _authData = null;
+  if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+  _fire();
+}
 
 export async function changeUsername(newUsername) {
-  if (!_user) throw new Error('Not signed in');
-  if (!newUsername.trim()) throw new Error('Username cannot be empty');
-  if (db) await set(ref(db, `users/${_user.uid}/username`), newUsername.trim());
-  _username = newUsername.trim();
+  if (!_authData) throw new Error('Not signed in');
+  const trimmed = newUsername.trim();
+  if (!trimmed) throw new Error('Username cannot be empty');
+  await _apiFetch('/api/user/username', { method: 'PATCH', body: JSON.stringify({ username: trimmed }) });
+  _authData = { ..._authData, username: trimmed };
+  saveAuth(_authData);
 }
 
 export async function deleteData() {
-  if (!_user) throw new Error('Not signed in');
-  if (db) await remove(ref(db, `users/${_user.uid}/pbs`));
+  if (!_authData) throw new Error('Not signed in');
+  await _apiFetch('/api/user/data', { method: 'DELETE' });
   localStorage.removeItem('sirtet_stats');
 }
 
 export async function deleteAccount() {
-  if (!_user) throw new Error('Not signed in');
-  if (db) await remove(ref(db, `users/${_user.uid}`));
-  await deleteUser(_user);
+  if (!_authData) throw new Error('Not signed in');
+  await _apiFetch('/api/user', { method: 'DELETE' });
+  clearAuth();
+  _authData = null;
+  if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+  _fire();
 }
 
 export async function uploadPB(key, data) {
-  if (!_user || !db) return;
-  try { await set(ref(db, `users/${_user.uid}/pbs/${key}`), data); } catch(e) {}
+  if (!_authData) return;
+  try { await _apiFetch(`/api/user/pbs/${key}`, { method: 'POST', body: JSON.stringify(data) }); } catch { /* silent */ }
 }
 
-async function fetchUsername(uid) {
-  if (!db) return null;
-  try {
-    const snap = await get(ref(db, `users/${uid}/username`));
-    return snap.exists() ? snap.val() : null;
-  } catch(e) { return null; }
-}
-
-async function syncFromCloud() {
-  if (!_user || !db) return;
-  try {
-    const snap  = await get(ref(db, `users/${_user.uid}/pbs`));
-    const local = loadStats();
-    const cloud = snap.exists() ? snap.val() : {};
-
-    for (const [key, val] of Object.entries(cloud)) {
-      if (!local[key]) {
-        local[key] = val;
-      } else if (key.startsWith('sprint_')) {
-        if (val.ms < local[key].ms) local[key] = val;
-      } else {
-        if (val.lines > local[key].lines) local[key] = val;
-      }
-    }
-    saveStats(local);
-
-    for (const [key, val] of Object.entries(local)) {
-      const cv       = cloud[key];
-      const isBetter = !cv
-        || (key.startsWith('sprint_') ? val.ms < cv.ms : val.lines > cv.lines);
-      if (isBetter) await set(ref(db, `users/${_user.uid}/pbs/${key}`), val);
-    }
-  } catch(e) { console.warn('Cloud sync failed:', e.message); }
-}
-
+// ── Init ──────────────────────────────────────────────────────────────────────
 export function initAuth(onUserChange) {
-  if (!auth) { onUserChange(null, null); return; }
-  onAuthStateChanged(auth, async user => {
-    _user = user;
-    if (user) {
-      _username = await fetchUsername(user.uid);
-      await syncFromCloud();
-    } else {
-      _username = null;
-    }
-    onUserChange(user, _username);
-  });
+  _onChange = onUserChange;
+  if (!_authData) { onUserChange(null, null); return; }
+
+  const now = Date.now();
+  if (_authData.expiresAt && now >= _authData.expiresAt) {
+    // Expired — try refresh, then fire
+    _refreshToken().then(() => {
+      onUserChange(currentUser(), _authData?.username ?? null);
+      _schedRefresh();
+    });
+  } else {
+    onUserChange(currentUser(), _authData.username ?? null);
+    _schedRefresh();
+  }
 }

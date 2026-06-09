@@ -6,6 +6,7 @@ import { computeBestMove as computeBestMove2 } from './ai2.js';
 
 
 import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken, showCountdown } from './ui.js';
+import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 let computeBestMove = computeBestMove1;
 
@@ -406,30 +407,54 @@ function drawGridLines(ctx, el) {
   for (let c = 0; c <= COLS; c++) { ctx.beginPath(); ctx.moveTo(c * VS_SZ, 0); ctx.lineTo(c * VS_SZ, ROWS * VS_SZ); ctx.stroke(); }
 }
 
+function botDrawWrapped(ctx, el, ox, oy, fn) {
+  const w = el.width, h = el.height;
+  const nx = ((ox % w) + w) % w;
+  const ny = ((oy % h) + h) % h;
+  ctx.save(); ctx.translate(nx,     ny    ); fn(); ctx.restore();
+  ctx.save(); ctx.translate(nx - w, ny    ); fn(); ctx.restore();
+  ctx.save(); ctx.translate(nx,     ny - h); fn(); ctx.restore();
+  ctx.save(); ctx.translate(nx - w, ny - h); fn(); ctx.restore();
+}
+
 function drawPlayerBoard() {
+  const { circleGrid, circlePiece } = getCircleOffsets(performance.now());
   drawGridLines(myCtx, myBoardEl);
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
-      if (pGrid[r][c]) drawCell(myCtx, pGrid[r][c], c, r);
+  const drawGrid = () => {
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (pGrid[r][c]) drawCell(myCtx, pGrid[r][c], c, r);
+  };
+  if (circleGrid) botDrawWrapped(myCtx, myBoardEl, circleGrid.x, circleGrid.y, drawGrid);
+  else drawGrid();
   if (pPiece) {
     const gy = pGhostY();
-    for (let r = 0; r < pPiece.shape.length; r++)
-      for (let c = 0; c < pPiece.shape[r].length; c++)
-        if (pPiece.shape[r][c]) drawCell(myCtx, pieceColors[pPiece.key], pPiece.x + c, gy + r, cfg.ghostOpacity || 0.25);
-    const col = pLockFlashing && !pLockBright ? darken(pieceColors[pPiece.key]) : pieceColors[pPiece.key];
-    for (let r = 0; r < pPiece.shape.length; r++)
-      for (let c = 0; c < pPiece.shape[r].length; c++)
-        if (pPiece.shape[r][c]) drawCell(myCtx, col, pPiece.x + c, pPiece.y + r);
+    const drawPiece = () => {
+      for (let r = 0; r < pPiece.shape.length; r++)
+        for (let c = 0; c < pPiece.shape[r].length; c++)
+          if (pPiece.shape[r][c]) drawCell(myCtx, pieceColors[pPiece.key], pPiece.x + c, gy + r, cfg.ghostOpacity || 0.25);
+      const col = pLockFlashing && !pLockBright ? darken(pieceColors[pPiece.key]) : pieceColors[pPiece.key];
+      for (let r = 0; r < pPiece.shape.length; r++)
+        for (let c = 0; c < pPiece.shape[r].length; c++)
+          if (pPiece.shape[r][c]) drawCell(myCtx, col, pPiece.x + c, pPiece.y + r);
+    };
+    if (circlePiece) botDrawWrapped(myCtx, myBoardEl, circlePiece.x, circlePiece.y, drawPiece);
+    else drawPiece();
   }
 }
 
 function drawBotBoard() {
+  const { circleGrid } = getCircleOffsets(performance.now());
   drawGridLines(oppCtx, oppBoardEl);
-  if (bGrid)
-    for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < COLS; c++)
-        if (bGrid[r][c]) drawCell(oppCtx, bGrid[r][c], c, r);
-  // Show bot's precomputed landing target as a dim preview
+  if (bGrid) {
+    const drawGrid = () => {
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (bGrid[r][c]) drawCell(oppCtx, bGrid[r][c], c, r);
+    };
+    if (circleGrid) botDrawWrapped(oppCtx, oppBoardEl, circleGrid.x, circleGrid.y, drawGrid);
+    else drawGrid();
+  }
   if (bPiece && botRunLoop) {
     const shape = ROTATIONS[bPiece.key][bTargetRot];
     for (let r = 0; r < shape.length; r++)
@@ -444,12 +469,14 @@ function buildPlayerPreviews() {
     const cv = document.createElement('canvas');
     cv.width = 70; cv.height = i === 0 ? 44 : 32; cv.id = 'bot-prev-' + i; s.appendChild(cv);
   }
+  setupLimbo(s, 3);
   drawPlayerPreviews();
 }
 function drawPlayerPreviews() {
+  const q = limboQueue(pQueue, 3);
   for (let i = 0; i < 3; i++) {
     const cv = document.getElementById('bot-prev-' + i);
-    if (cv) drawMini(cv.getContext('2d'), pQueue[i] || null, cv.width, cv.height);
+    if (cv) drawMini(cv.getContext('2d'), q[i] || null, cv.width, cv.height);
   }
 }
 function drawBotHold() {
@@ -464,12 +491,14 @@ function buildBotPreviews() {
     const cv = document.createElement('canvas');
     cv.width = 60; cv.height = i === 0 ? 38 : 28; cv.id = 'bot-oprev-' + i; s.appendChild(cv);
   }
+  setupLimbo(s, 3);
   drawBotPreviews();
 }
 function drawBotPreviews() {
+  const q = limboQueue(bQueue, 3);
   for (let i = 0; i < 3; i++) {
     const cv = document.getElementById('bot-oprev-' + i);
-    if (cv) drawMini(cv.getContext('2d'), bQueue[i] || null, cv.width, cv.height);
+    if (cv) drawMini(cv.getContext('2d'), q[i] || null, cv.width, cv.height);
   }
 }
 

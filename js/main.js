@@ -1,12 +1,13 @@
-import { db } from './firebase.js';
 import { loadGlobal, cfg, keybinds, checkBind, saveGlobal } from './state.js';
 import { showScreen as _showScreen, drawMini } from './ui.js';
 import { renderStats, setUploader } from './stats.js';
 import { initAuth, signUp, logIn, logOut, uploadPB,
-  currentUser, currentUsername, changeUsername, deleteData, deleteAccount } from './account.js';
+  currentUser, currentUsername, changeUsername, deleteData, deleteAccount,
+  getIdToken, sendVerificationCode } from './account.js';
+import { getSocket, reconnectSocket, setSocketStatusCallback } from './api.js';
 import { syncSettingsUI, updateHandlingSummary, buildKeybindTable, buildPieceColorPickers,
   resetSettings, selectMode, selectedMode, applyPreset, readSetupCfg,
-  getListeningFor, captureKey, selectSub } from './settings.js';
+  getListeningFor, captureKey, selectSub, applyBpmToAll } from './settings.js';
 import { startGame, togglePause, stopGame, running, paused,
   hardDrop, doHold, tryRotate, tryRotate180,
   startDAS, stopDAS, startSoftDrop, stopSD,
@@ -24,6 +25,7 @@ import { mrRunning, mrPiece, stopMrGame, leaveMrRoom,
   createMrRoom, joinMrRoom, startMrGameFromHost, onMrSettingChange,
   mrStartDAS, mrStopDAS, mrStartSD, mrStopSD,
   mrTryRotate, mrTryRotate180, mrHardDrop, mrDoHold } from './mr.js';
+import { ensureRunning as ensureStupidRunning } from './stupid.js';
 
 // Full showScreen with side effects
 function showScreen(id) {
@@ -40,9 +42,11 @@ function showScreen(id) {
   }
 }
 
-function setFbStatus(s) {
-  document.getElementById('fb-dot').className = 'fb-dot ' + s;
-  document.getElementById('fb-label').textContent = s === 'ok' ? 'Online' : s === 'err' ? 'Offline' : '–';
+function setConnStatus(s) {
+  const dot = document.getElementById('fb-dot');
+  const lbl = document.getElementById('fb-label');
+  if (dot) dot.className = 'fb-dot ' + s;
+  if (lbl) lbl.textContent = s === 'ok' ? 'Online' : s === 'err' ? 'Offline' : '–';
 }
 
 // Window exposures
@@ -102,6 +106,11 @@ function refreshAccountScreen() {
     document.getElementById('auth-email').value    = '';
     document.getElementById('auth-password').value = '';
     document.getElementById('auth-error').textContent = '';
+    // Reset signup flow back to the email/password form
+    const codeSection = document.getElementById('auth-code-section');
+    const signInForm  = document.getElementById('auth-signin-form');
+    if (codeSection) codeSection.style.display = 'none';
+    if (signInForm)  signInForm.style.display   = 'block';
   }
 }
 
@@ -117,13 +126,57 @@ function updateAuthBar(user, username) {
   }
 }
 
+// Step 1: request code
 window.doSignUp = async function() {
   const email = document.getElementById('auth-email').value.trim();
   const pw    = document.getElementById('auth-password').value;
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
-  try { await signUp(email, pw); }
+  if (!email || !pw) { errEl.textContent = 'Email and password required'; return; }
+  try {
+    await sendVerificationCode(email);
+    // Show the code entry section, hide the form
+    document.getElementById('auth-signin-form').style.display  = 'none';
+    document.getElementById('auth-code-section').style.display = 'block';
+    document.getElementById('auth-code-hint').textContent = `Enter the 6-digit code sent to ${email}.`;
+    document.getElementById('auth-code').value = '';
+    document.getElementById('auth-code-error').textContent = '';
+    document.getElementById('auth-code').focus();
+  } catch(e) { errEl.textContent = fmtAuthErr(e); }
+};
+
+// Step 2: submit code
+window.doVerifySignUp = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pw    = document.getElementById('auth-password').value;
+  const code  = document.getElementById('auth-code').value.trim();
+  const errEl = document.getElementById('auth-code-error');
+  errEl.textContent = '';
+  if (!code) { errEl.textContent = 'Enter your verification code'; return; }
+  try { await signUp(email, pw, code); }
   catch(e) { errEl.textContent = fmtAuthErr(e); }
+};
+
+// Resend code from the verification screen
+window.doResendCode = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const errEl = document.getElementById('auth-code-error');
+  errEl.textContent = '';
+  try {
+    await sendVerificationCode(email);
+    errEl.style.color = 'var(--accent2)';
+    errEl.textContent = 'Code resent!';
+    setTimeout(() => { errEl.textContent = ''; errEl.style.color = ''; }, 2500);
+  } catch(e) {
+    errEl.style.color = '';
+    errEl.textContent = fmtAuthErr(e);
+  }
+};
+
+// Back to sign-in form
+window.doBackToLogin = function() {
+  document.getElementById('auth-code-section').style.display = 'none';
+  document.getElementById('auth-signin-form').style.display  = 'block';
 };
 
 window.doLogIn = async function() {
@@ -135,7 +188,7 @@ window.doLogIn = async function() {
   catch(e) { errEl.textContent = fmtAuthErr(e); }
 };
 
-window.doLogOut = async function() { await logOut(); };
+window.doLogOut = function() { logOut(); };
 
 window.doChangeUsername = async function() {
   const val    = document.getElementById('account-new-username').value.trim();
@@ -165,19 +218,13 @@ window.doDeleteData = async function() {
 
 window.doDeleteAccount = async function() {
   if (!confirm('Permanently delete your account and all data? This cannot be undone.')) return;
-  try {
-    await deleteAccount();
-  } catch(e) {
-    if (e.code === 'auth/requires-recent-login') {
-      alert('Please sign out and sign back in, then try again.');
-    } else {
-      alert(e.message);
-    }
-  }
+  try { await deleteAccount(); }
+  catch(e) { alert(e.message); }
 };
-window.resetSettings = resetSettings;
-window.selectMode    = selectMode;
-window.selectSub     = selectSub;
+window.resetSettings  = resetSettings;
+window.selectMode     = selectMode;
+window.selectSub      = selectSub;
+window.applyBpmToAll  = applyBpmToAll;
 window.cfg           = cfg;
 window.drawHold      = drawHold;
 
@@ -292,14 +339,22 @@ document.getElementById('restart-btn').onclick = startGame;
 
 // Initialization
 loadGlobal();
+if (cfg.colorShift || cfg.limbo || cfg.drunk) ensureStupidRunning();
 syncSettingsUI();
 buildKeybindTable();
 buildPieceColorPickers();
 updateHandlingSummary();
 selectMode('sprint');
-setFbStatus(db ? 'ok' : 'err');
 setUploader(uploadPB);
-initAuth((user, username) => {
+
+// Wire socket connection status — persists across reconnects
+setSocketStatusCallback(setConnStatus);
+setConnStatus(getSocket()?.connected ? 'ok' : 'err');
+
+initAuth(async (user, username) => {
+  // Reconnect socket with the new auth token whenever auth state changes
+  const token = user ? await getIdToken() : null;
+  reconnectSocket(token);
   updateAuthBar(user, username);
   refreshAccountScreen();
   if (document.getElementById('screen-stats').classList.contains('active')) renderStats();

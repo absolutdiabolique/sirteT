@@ -1,7 +1,16 @@
 // mr.js — Custom Multi-Player Room (2–8 players)
-// Firebase paths:
-//   rooms_mr/{roomId}/players/{uid}        — own state
-//   rooms_mr/{roomId}/attacks/{targetUid}/ — any player writes, only target reads & consumes
+// Socket events:
+//   mr:create        — create a new room (owner)
+//   mr:join          — join an existing room
+//   mr:subscribe     — start receiving mr:room / mr:attack events
+//   mr:updateSettings — push settings change (owner only)
+//   mr:startGame     — trigger game start (owner only)
+//   mr:syncBoard     — throttled board state
+//   mr:topOut        — mark self dead
+//   mr:leave         — leave room (owner closes it)
+//   mr:room          — full room snapshot (server → client)
+//   mr:roomDeleted   — room was removed (server → client)
+//   mr:attack        — incoming garbage (server → client)
 
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
@@ -11,21 +20,19 @@ import {
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
 import { createBoard } from './board.js';
-import { db } from './firebase.js';
 import { currentUser, currentUsername } from './account.js';
-import { ref, set, get, push, remove, onValue, onChildAdded, onDisconnect, update, serverTimestamp }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getSocket, sendAttack } from './api.js';
+import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
-const MR_ROOT    = 'rooms_mr';
 const MR_PREVIEW = 5;
 
-// ── Canvas setup ───────────────────────────────────────────────────────────────
+// ── Canvas setup ───────────────────────────────────────────────────────────────────
 const mrBoardEl = document.getElementById('mr-board');
 const mrBrd     = createBoard(mrBoardEl, SZ);
 const mrHoldEl  = document.getElementById('mr-hold-canvas');
 const mrHoldCtx = mrHoldEl.getContext('2d');
 
-// ── Room state ─────────────────────────────────────────────────────────────────
+// ── Room state ─────────────────────────────────────────────────────────────────────
 let mrRoomId     = null;
 let mrMyUid      = null;
 let mrMyUsername = null;
@@ -33,11 +40,7 @@ let mrIsOwner    = false;
 let mrSettings   = { maxPlayers: 4, garbMult: 1.0 };
 let mrGameId     = null;
 
-let mrRoomUnsub    = null;
-let mrAttacksUnsub = null;
-let mrMyRef        = null;
-
-// ── Game state ─────────────────────────────────────────────────────────────────
+// ── Game state ─────────────────────────────────────────────────────────────────────
 export let mrRunning = false;
 export let mrPiece   = null;
 
@@ -56,72 +59,59 @@ let mrSdActive = false, mrSdInterval = null;
 let mrSyncPending = false;
 let mrPlayers = {};
 
-function genCode() { return Math.random().toString(36).slice(2,8).toUpperCase(); }
-function mrPlayerEntry() {
-  return { username: mrMyUsername, alive: true, score: 0, next: [], hold: null, lastSeen: Date.now(), killedBy: null };
-}
-
-// ── Create / Join ──────────────────────────────────────────────────────────────
+// ── Create / Join ──────────────────────────────────────────────────────────────────
 export async function createMrRoom() {
-  const user = currentUser();
-  if (!user) { showToast('Sign in to create a room'); return; }
-  if (!db)   { showToast('Firebase not configured'); return; }
+  const user   = currentUser();
+  const socket = getSocket();
+  if (!user)   { showToast('Sign in to create a room'); return; }
+  if (!socket) { showToast('Not connected'); return; }
 
   mrMyUid      = user.uid;
   mrMyUsername = currentUsername() || user.email;
-  mrRoomId     = genCode();
   mrIsOwner    = true;
   mrSettings   = { maxPlayers: 4, garbMult: 1.0 };
   mrGameId     = null;
 
-  await set(ref(db, `${MR_ROOT}/${mrRoomId}`), {
-    ownerId : mrMyUid,
-    status  : 'waiting',
-    settings: mrSettings,
-    players : { [mrMyUid]: mrPlayerEntry() }
+  return new Promise(resolve => {
+    socket.emit('mr:create', { uid: mrMyUid, username: mrMyUsername, settings: mrSettings }, res => {
+      if (res?.error) { showToast(res.error); resolve(); return; }
+      mrRoomId = res.roomId;
+      applyWaitRoom();
+      listenRoom();
+      window.showScreen('screen-mr-wait');
+      resolve();
+    });
   });
-  onDisconnect(ref(db, `${MR_ROOT}/${mrRoomId}/players/${mrMyUid}`)).remove();
-
-  applyWaitRoom();
-  listenRoom();
-  window.showScreen('screen-mr-wait');
 }
 
 export async function joinMrRoom() {
-  const user = currentUser();
-  if (!user) { showToast('Sign in to join a room'); return; }
-  if (!db)   { showToast('Firebase not configured'); return; }
+  const user   = currentUser();
+  const socket = getSocket();
+  if (!user)   { showToast('Sign in to join a room'); return; }
+  if (!socket) { showToast('Not connected'); return; }
 
   const code = (document.getElementById('mr-code-input').value || '').trim().toUpperCase();
   if (!code) { showToast('Enter a room code'); return; }
 
-  let snap;
-  try { snap = await get(ref(db, `${MR_ROOT}/${code}`)); }
-  catch(e) { showToast('Network error'); return; }
-  if (!snap.exists()) { showToast('Room not found'); return; }
-
-  const data = snap.val();
-  if (data.status !== 'waiting') { showToast('Game already started'); return; }
-  const count = Object.keys(data.players || {}).length;
-  const maxP  = (data.settings || {}).maxPlayers || 4;
-  if (count >= maxP) { showToast('Room is full'); return; }
-
   mrMyUid      = user.uid;
   mrMyUsername = currentUsername() || user.email;
-  mrRoomId     = code;
   mrIsOwner    = false;
-  mrSettings   = data.settings || { maxPlayers: 4, garbMult: 1.0 };
-  mrGameId     = null;
 
-  await update(ref(db, `${MR_ROOT}/${mrRoomId}/players`), { [mrMyUid]: mrPlayerEntry() });
-  onDisconnect(ref(db, `${MR_ROOT}/${mrRoomId}/players/${mrMyUid}`)).remove();
-
-  applyWaitRoom();
-  listenRoom();
-  window.showScreen('screen-mr-wait');
+  return new Promise(resolve => {
+    socket.emit('mr:join', { code, uid: mrMyUid, username: mrMyUsername }, res => {
+      if (res?.error) { showToast(res.error); resolve(); return; }
+      mrRoomId   = res.roomId;
+      mrSettings = res.settings || mrSettings;
+      mrGameId   = null;
+      applyWaitRoom();
+      listenRoom();
+      window.showScreen('screen-mr-wait');
+      resolve();
+    });
+  });
 }
 
-// ── Waiting room UI ────────────────────────────────────────────────────────────
+// ── Waiting room UI ────────────────────────────────────────────────────────────────
 function applyWaitRoom() {
   document.getElementById('mr-wait-code').textContent   = mrRoomId;
   document.getElementById('mr-start-btn').style.display = mrIsOwner ? 'block' : 'none';
@@ -139,10 +129,11 @@ function applySettingsUI() {
 }
 
 export function onMrSettingChange() {
-  if (!mrIsOwner || !db || !mrRoomId) return;
+  const socket = getSocket();
+  if (!mrIsOwner || !socket || !mrRoomId) return;
   mrSettings.maxPlayers = parseInt(document.getElementById('mr-set-max').value);
   mrSettings.garbMult   = parseFloat(document.getElementById('mr-set-garb').value);
-  update(ref(db, `${MR_ROOT}/${mrRoomId}`), { settings: mrSettings });
+  socket.emit('mr:updateSettings', { settings: mrSettings });
 }
 
 function updateWaitPlayers(data) {
@@ -163,26 +154,26 @@ function updateWaitPlayers(data) {
   });
 }
 
-// ── Start game (host only) ─────────────────────────────────────────────────────
-export async function startMrGameFromHost() {
-  if (!mrIsOwner || !db || !mrRoomId) return;
-  const snap    = await get(ref(db, `${MR_ROOT}/${mrRoomId}/players`));
-  const pCount  = Object.keys(snap.val() || {}).length;
-  if (pCount < 2) { showToast('Need at least 2 players'); return; }
-  const gameId  = genCode();
-  await update(ref(db, `${MR_ROOT}/${mrRoomId}`), {
-    status: 'playing', gameId, startTime: serverTimestamp()
+// ── Start game (host only) ─────────────────────────────────────────────────────────
+export function startMrGameFromHost() {
+  const socket = getSocket();
+  if (!mrIsOwner || !socket || !mrRoomId) return;
+  socket.emit('mr:startGame', res => {
+    if (res?.error) showToast(res.error);
   });
 }
 
-// ── Room listener ──────────────────────────────────────────────────────────────
+// ── Room listener ──────────────────────────────────────────────────────────────────
 function listenRoom() {
-  if (mrRoomUnsub) { mrRoomUnsub(); mrRoomUnsub = null; }
-  mrRoomUnsub = onValue(ref(db, `${MR_ROOT}/${mrRoomId}`), snap => {
-    if (!snap.exists()) { leaveMrRoom(); return; }
-    const data = snap.val();
-    mrSettings = data.settings || mrSettings;
+  const socket = getSocket();
+  if (!socket) return;
 
+  socket.off('mr:room');
+  socket.off('mr:roomDeleted');
+  socket.off('mr:attack');
+
+  socket.on('mr:room', data => {
+    mrSettings = data.settings || mrSettings;
     if (!mrRunning) {
       updateWaitPlayers(data);
       applySettingsUI();
@@ -191,7 +182,6 @@ function listenRoom() {
         enterMrGame();
       }
     } else {
-      // Update player panel during game
       const players = data.players || {};
       for (const [uid, p] of Object.entries(players)) {
         if (uid === mrMyUid) continue;
@@ -205,9 +195,18 @@ function listenRoom() {
       checkMrWin();
     }
   });
+
+  socket.on('mr:roomDeleted', () => { leaveMrRoom(); });
+
+  socket.on('mr:attack', ({ from, lines }) => {
+    mrGarbage.push({ lines, from });
+    updateGarbageBar('mr-garbage-bar', mrGarbage.map(g => g.lines));
+  });
+
+  socket.emit('mr:subscribe', { roomId: mrRoomId, uid: mrMyUid });
 }
 
-// ── Enter game ─────────────────────────────────────────────────────────────────
+// ── Enter game ─────────────────────────────────────────────────────────────────────
 function enterMrGame() {
   window.showScreen('screen-mr');
   initMrGame();
@@ -230,35 +229,23 @@ function initMrGame() {
   mrPlayers = {};
   mrCancelLock();
 
-  mrMyRef = ref(db, `${MR_ROOT}/${mrRoomId}/players/${mrMyUid}`);
-
-  if (mrAttacksUnsub) { mrAttacksUnsub(); mrAttacksUnsub = null; }
-  mrAttacksUnsub = onChildAdded(ref(db, `${MR_ROOT}/${mrRoomId}/attacks/${mrMyUid}`), snap => {
-    const atk = snap.val();
-    if (!atk) return;
-    mrGarbage.push({ lines: atk.lines, from: atk.from });
-    updateGarbageBar('mr-garbage-bar', mrGarbage.map(g => g.lines));
-    remove(snap.ref);
-  });
-
   mrEnsureQueue();
-  mrBuildPreviews();   // previews show queue before spawn
+  mrBuildPreviews();
   mrDrawHold();
-  // Draw empty board with gridlines visible behind countdown
   mrBrd.draw({ grid: mrGrid, piece: null, ghostY: null, lockFlashing: false, lockBright: true,
     ghostOpacity: 0, gridOn: true, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth });
 
   mrRunning = false;
   cancelAnimationFrame(mrRafId);
   showCountdown('mr-board-wrap', () => {
-    mrSpawnNext();      // first piece spawns when GO! fires
+    mrSpawnNext();
     mrRunning  = true;
     mrLastTime = performance.now();
     mrRafId = requestAnimationFrame(mrLoop);
   });
 }
 
-// ── Queue ──────────────────────────────────────────────────────────────────────
+// ── Queue ──────────────────────────────────────────────────────────────────────────
 function mrEnsureQueue() {
   while (mrBag.length < 14) fillBag(mrBag);
   while (mrQueue.length < MR_PREVIEW + 1) mrQueue.push(mrBag.shift());
@@ -270,7 +257,7 @@ function mrDequeue() {
   return k;
 }
 
-// ── Physics ────────────────────────────────────────────────────────────────────
+// ── Physics ────────────────────────────────────────────────────────────────────────
 function mrGrounded() { return mrPiece && collide(mrPiece.shape, mrPiece.x, mrPiece.y + 1, mrGrid); }
 function mrGhostY()   { let g = mrPiece.y; while (!collide(mrPiece.shape, mrPiece.x, g + 1, mrGrid)) g++; return g; }
 
@@ -293,7 +280,7 @@ function mrOnMove() {
   else mrCancelLock(true);
 }
 
-// ── Rotation / movement ────────────────────────────────────────────────────────
+// ── Rotation / movement ────────────────────────────────────────────────────────────
 export function mrTryRotate(ccw = false) {
   if (!mrRunning || !mrPiece || !mrAlive) return;
   const nr  = ((mrPiece.rot + (ccw ? -1 : 1)) + 4) % 4;
@@ -343,7 +330,7 @@ export function mrDoHold() {
   mrHoldUsed = true; mrDrawHold();
 }
 
-// ── Spawn ──────────────────────────────────────────────────────────────────────
+// ── Spawn ──────────────────────────────────────────────────────────────────────────
 function mrSpawnNext() {
   mrPiece = mkPiece(mrDequeue());
   mrDropAcc = 0; mrLockMoves = 0;
@@ -351,7 +338,7 @@ function mrSpawnNext() {
   mrOnMove(); mrDrawPreviews(); schedMrSync();
 }
 
-// ── Lock ───────────────────────────────────────────────────────────────────────
+// ── Lock ───────────────────────────────────────────────────────────────────────────
 function mrDoLock() {
   const spin = mrIsSpin(), lockedKey = mrPiece.key;
   for (let r = 0; r < mrPiece.shape.length; r++) {
@@ -373,7 +360,7 @@ function mrIsSpin() {
          collide(mrPiece.shape, mrPiece.x,   mrPiece.y-1, mrGrid);
 }
 
-// ── Garbage ────────────────────────────────────────────────────────────────────
+// ── Garbage ────────────────────────────────────────────────────────────────────────
 function mrApplyGarbage() {
   if (!mrGarbage.length) return;
   const seg  = mrGarbage.shift();
@@ -387,7 +374,7 @@ function mrApplyGarbage() {
   updateGarbageBar('mr-garbage-bar', mrGarbage.map(g => g.lines));
 }
 
-// ── Clear lines ────────────────────────────────────────────────────────────────
+// ── Clear lines ────────────────────────────────────────────────────────────────────
 function mrBaseAtk(n, spin) { return spin ? [0,2,4,7][Math.min(n,3)] : [0,0.5,1,2,4][Math.min(n,4)]; }
 function mrB2bBonus(b) {
   if (b<=2) return 0; if (b<=5) return 1; if (b<=10) return 2;
@@ -441,14 +428,15 @@ function mrClearLines(spin, key) {
   showSplash('mr-board-wrap', lbl, key, spin, 'left');
 }
 
-// ── Top out ────────────────────────────────────────────────────────────────────
+// ── Top out ────────────────────────────────────────────────────────────────────────
 function mrTopOut() {
   mrAlive = false;
   const ov = document.getElementById('mr-dead-overlay');
   ov.style.display = 'flex';
   document.getElementById('mr-dead-score').textContent = mrScore.toFixed(1);
-  if (mrMyRef) {
-    set(mrMyRef, {
+  const socket = getSocket();
+  if (socket) {
+    socket.emit('mr:topOut', {
       username: mrMyUsername,
       score:    parseFloat(mrScore.toFixed(1)),
       alive:    false,
@@ -458,7 +446,7 @@ function mrTopOut() {
   }
 }
 
-// ── Win detection ──────────────────────────────────────────────────────────────
+// ── Win detection ──────────────────────────────────────────────────────────────────
 function checkMrWin() {
   if (!mrAlive || mrWon) return;
   const others = Object.entries(mrPlayers).filter(([, p]) => p.alive !== false);
@@ -470,7 +458,7 @@ function checkMrWin() {
   }
 }
 
-// ── Targeting (score-based, same as QP) ───────────────────────────────────────
+// ── Targeting (score-based) ───────────────────────────────────────────────────
 function getMrTarget() {
   const now   = Date.now();
   const alive = Object.entries(mrPlayers)
@@ -482,22 +470,22 @@ function getMrTarget() {
   return i === all.length - 1 ? (i > 0 ? all[i-1].uid : null) : all[i+1].uid;
 }
 
-async function sendMrAttack(lines) {
-  if (!db) return;
+function sendMrAttack(lines) {
   const target = getMrTarget();
   if (!target) return;
-  try { await push(ref(db, `${MR_ROOT}/${mrRoomId}/attacks/${target}`), { from: mrMyUid, lines }); }
-  catch(e) {}
+  sendAttack({ mode: 'mr', lines, targetId: target, roomId: mrRoomId });
 }
 
-// ── Firebase sync (throttled 100ms) ───────────────────────────────────────────
+// ── Socket sync (throttled 100ms) ─────────────────────────────────────────────────
 function schedMrSync() {
   if (mrSyncPending) return;
   mrSyncPending = true;
   setTimeout(() => {
     mrSyncPending = false;
-    if (!mrMyRef || !mrAlive) return;
-    set(mrMyRef, {
+    if (!mrAlive) return;
+    const socket = getSocket();
+    if (!socket) return;
+    socket.emit('mr:syncBoard', {
       username: mrMyUsername,
       score:    parseFloat(mrScore.toFixed(1)),
       alive:    true,
@@ -509,7 +497,7 @@ function schedMrSync() {
   }, 100);
 }
 
-// ── Players panel ──────────────────────────────────────────────────────────────
+// ── Players panel ──────────────────────────────────────────────────────────────────
 function updateMrPanel() {
   const el = document.getElementById('mr-players-list');
   if (!el) return;
@@ -529,7 +517,7 @@ function updateMrPanel() {
   }).join('') || '<div style="font-size:11px;color:var(--muted);padding:8px 6px;">Waiting for others…</div>';
 }
 
-// ── Draw helpers ───────────────────────────────────────────────────────────────
+// ── Draw helpers ───────────────────────────────────────────────────────────────────
 export function mrDrawHold() {
   mrHoldCtx.globalAlpha = cfg.holdMode === 'none' ? 0.2 : 1;
   drawMini(mrHoldCtx, mrHeld, mrHoldEl.width, mrHoldEl.height);
@@ -544,16 +532,18 @@ function mrBuildPreviews() {
     c.width = 90; c.height = i === 0 ? 52 : 36; c.id = 'mr-prev-' + i;
     stack.appendChild(c);
   }
+  setupLimbo(stack, MR_PREVIEW);
   mrDrawPreviews();
 }
 function mrDrawPreviews() {
+  const q = limboQueue(mrQueue, MR_PREVIEW);
   for (let i = 0; i < MR_PREVIEW; i++) {
     const c = document.getElementById('mr-prev-' + i);
-    if (c) drawMini(c.getContext('2d'), mrQueue[i] || null, c.width, c.height);
+    if (c) drawMini(c.getContext('2d'), q[i] || null, c.width, c.height);
   }
 }
 
-// ── DAS / Soft drop ────────────────────────────────────────────────────────────
+// ── DAS / Soft drop ────────────────────────────────────────────────────────────────
 export function mrStartDAS(dx) {
   mrStopDAS(); mrDasDx = dx; mrDasHeld = true; mrMoveH(dx);
   mrDasTimer = setTimeout(() => {
@@ -584,7 +574,7 @@ export function mrStartSD() {
 }
 export function mrStopSD() { mrSdActive = false; clearInterval(mrSdInterval); mrSdInterval = null; }
 
-// ── Game loop ──────────────────────────────────────────────────────────────────
+// ── Game loop ──────────────────────────────────────────────────────────────────────
 function mrLoop(ts) {
   if (!mrRunning) return;
   const dt = Math.min(ts - mrLastTime, 100);
@@ -601,12 +591,14 @@ function mrLoop(ts) {
     }
   }
 
+  const { circleGrid, circlePiece } = getCircleOffsets(ts);
   mrBrd.draw({
     grid: mrGrid, piece: mrAlive ? mrPiece : null,
     ghostY:      (mrAlive && mrPiece && cfg.ghostOpacity > 0) ? mrGhostY() : null,
     lockFlashing: mrLockFlashing, lockBright: mrLockBright,
     ghostOpacity: cfg.ghostOpacity,
     gridOn: cfg.gridOn, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth,
+    circleGrid, circlePiece,
   });
   mrDrawPreviews();
   mrDrawHold();
@@ -620,26 +612,23 @@ function mrLoop(ts) {
   mrRafId = requestAnimationFrame(mrLoop);
 }
 
-// ── Stop / Leave ───────────────────────────────────────────────────────────────
+// ── Stop / Leave ───────────────────────────────────────────────────────────────────
 export function stopMrGame() {
   mrRunning = false;
   cancelAnimationFrame(mrRafId);
   mrCancelLock(); mrStopDAS(); mrStopSD();
-  if (mrAttacksUnsub) { mrAttacksUnsub(); mrAttacksUnsub = null; }
   mrPiece = null;
 }
 
-export async function leaveMrRoom() {
+export function leaveMrRoom() {
   stopMrGame();
-  if (mrRoomUnsub) { mrRoomUnsub(); mrRoomUnsub = null; }
-  if (db && mrRoomId && mrMyUid) {
-    if (mrIsOwner) {
-      // Owner leaving closes the room
-      remove(ref(db, `${MR_ROOT}/${mrRoomId}`)).catch(() => {});
-    } else {
-      update(ref(db, `${MR_ROOT}/${mrRoomId}/players`), { [mrMyUid]: null }).catch(() => {});
-    }
+  const socket = getSocket();
+  if (socket) {
+    socket.off('mr:room');
+    socket.off('mr:roomDeleted');
+    socket.off('mr:attack');
+    socket.emit('mr:leave', { isOwner: mrIsOwner });
   }
-  mrRoomId = mrMyUid = null; mrIsOwner = false; mrMyRef = null;
+  mrRoomId = mrMyUid = null; mrIsOwner = false;
   window.showScreen('screen-mr-lobby');
 }

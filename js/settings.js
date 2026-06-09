@@ -1,6 +1,7 @@
 import { cfg, keybinds, pieceColors, saveGlobal, keyLabel, resetKeybinds } from './state.js';
 import { DEFAULT_BINDS, ACTION_LABELS, PKEYS, RANKED_DEFAULTS, PRESETS } from './constants.js';
 import { showToast } from './ui.js';
+import { ensureRunning } from './stupid.js';
 
 export let selectedMode = 'sprint', selectedSub = null;
 
@@ -16,11 +17,20 @@ export function syncSettingsUI() {
   const ghostPct = Math.round(cfg.ghostOpacity * 100);
   document.getElementById('s-ghost').value = ghostPct;
   document.getElementById('s-ghost-val').textContent = ghostPct + '%';
+  document.getElementById('s-piece-outline').value = cfg.pieceOutline ? '1' : '0';
   document.getElementById('s-grid').value = cfg.gridOn ? '1' : '0';
   document.getElementById('s-grid-sub').style.display = cfg.gridOn ? 'flex' : 'none';
   document.getElementById('s-gw').value = cfg.gridWidth;
   document.getElementById('s-gw-val').textContent = cfg.gridWidth + 'px';
   document.getElementById('s-gc').value = cfg.gridColor;
+  document.getElementById('s-color-shift-bpm').value = cfg.colorShiftBpm;
+  document.getElementById('s-limbo-bpm').value        = cfg.limboBpm;
+  document.getElementById('s-drunk-bpm').value        = cfg.drunkBpm;
+  document.getElementById('s-circles-bpm').value      = cfg.circlesBpm;
+  document.getElementById('s-color-shift').value = cfg.colorShift ? '1' : '0';
+  document.getElementById('s-limbo').value = cfg.limbo ? '1' : '0';
+  document.getElementById('s-drunk').value = cfg.drunk ? '1' : '0';
+  document.getElementById('s-circles').value = cfg.circles ? '1' : '0';
 }
 
 export function updateHandlingSummary() {
@@ -82,7 +92,9 @@ export function buildPieceColorPickers() {
 export function resetSettings() {
   if (!confirm('Reset keybinds, DAS/ARR/SDF, and piece colors to defaults?')) return;
   cfg.das=167; cfg.arr=33; cfg.sdf=10;
-  cfg.ghostOpacity=0.30; cfg.gridOn=true; cfg.gridWidth=0.5; cfg.gridColor='#222233';
+  cfg.ghostOpacity=0.30; cfg.gridOn=true; cfg.gridWidth=0.5; cfg.gridColor='#222233'; cfg.pieceOutline=false;
+  cfg.colorShiftBpm=120; cfg.limboBpm=120; cfg.drunkBpm=120; cfg.circlesBpm=120;
+  cfg.colorShift=false; cfg.limbo=false; cfg.drunk=false; cfg.circles=false;
   resetKeybinds();
   Object.assign(pieceColors, {I:'#22d3ee',O:'#fde047',T:'#a855f7',S:'#4ade80',Z:'#f87171',J:'#60a5fa',L:'#fb923c'});
   syncSettingsUI(); buildKeybindTable(); buildPieceColorPickers(); saveGlobal();
@@ -234,6 +246,10 @@ document.getElementById('s-gc').oninput = function() {
   cfg.gridColor = this.value;
   saveGlobal();
 };
+document.getElementById('s-piece-outline').onchange = function() {
+  cfg.pieceOutline = this.value === '1';
+  saveGlobal();
+};
 document.getElementById('s-grid').onchange = function() {
   cfg.gridOn = this.value === '1';
   document.getElementById('s-grid-sub').style.display = this.value === '1' ? 'flex' : 'none';
@@ -245,3 +261,48 @@ document.getElementById('s-grid').onchange = function() {
   const el = document.getElementById(id);
   if(el) el.addEventListener('change', updateAsterisks);
 });
+
+// Stupid settings — per-effect BPM inputs
+function _clampBpm(v) { return Math.min(500, Math.max(30, v)); }
+document.getElementById('s-color-shift-bpm').oninput = function() {
+  const v = parseInt(this.value); if (!isNaN(v)) { cfg.colorShiftBpm = _clampBpm(v); saveGlobal(); }
+};
+document.getElementById('s-limbo-bpm').oninput = function() {
+  const v = parseInt(this.value); if (!isNaN(v)) { cfg.limboBpm = _clampBpm(v); saveGlobal(); }
+};
+document.getElementById('s-drunk-bpm').oninput = function() {
+  const v = parseInt(this.value); if (!isNaN(v)) { cfg.drunkBpm = _clampBpm(v); saveGlobal(); }
+};
+document.getElementById('s-circles-bpm').oninput = function() {
+  const v = parseInt(this.value); if (!isNaN(v)) { cfg.circlesBpm = _clampBpm(v); saveGlobal(); }
+};
+export function applyBpmToAll() {
+  const v = parseInt(document.getElementById('s-apply-bpm').value);
+  if (isNaN(v)) return;
+  const bpm = _clampBpm(v);
+  cfg.colorShiftBpm = cfg.limboBpm = cfg.drunkBpm = cfg.circlesBpm = bpm;
+  document.getElementById('s-color-shift-bpm').value = bpm;
+  document.getElementById('s-limbo-bpm').value        = bpm;
+  document.getElementById('s-drunk-bpm').value        = bpm;
+  document.getElementById('s-circles-bpm').value      = bpm;
+  saveGlobal();
+}
+document.getElementById('s-color-shift').onchange = function() {
+  cfg.colorShift = this.value === '1';
+  if (cfg.colorShift || cfg.limbo || cfg.drunk) ensureRunning();
+  saveGlobal();
+};
+document.getElementById('s-limbo').onchange = function() {
+  cfg.limbo = this.value === '1';
+  if (cfg.colorShift || cfg.limbo || cfg.drunk) ensureRunning();
+  saveGlobal();
+};
+document.getElementById('s-drunk').onchange = function() {
+  cfg.drunk = this.value === '1';
+  if (cfg.colorShift || cfg.limbo || cfg.drunk) ensureRunning();
+  saveGlobal();
+};
+document.getElementById('s-circles').onchange = function() {
+  cfg.circles = this.value === '1';
+  saveGlobal();
+};

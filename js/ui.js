@@ -6,6 +6,11 @@ export function darken(hex) {
   return `rgb(${Math.round(r*.45)},${Math.round(g*.45)},${Math.round(b*.45)})`;
 }
 
+export function lighten(hex) {
+  let r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgb(${Math.round(r+(255-r)*.55)},${Math.round(g+(255-g)*.55)},${Math.round(b+(255-b)*.55)})`;
+}
+
 export function drawMini(cx, key, cw, ch) {
   cx.fillStyle='#0a0a0c'; cx.fillRect(0,0,cw,ch);
   if(!key) return;

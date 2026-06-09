@@ -1,5 +1,6 @@
 import { COLS, ROWS, SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from './constants.js';
 import { cfg, pieceColors } from './state.js';
+import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
 import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showSplash, updateCounters, drawMini, showCountdown } from './ui.js';
 import { createBoard } from './board.js';
@@ -265,12 +266,14 @@ export function buildPreviews() {
     const c=document.createElement('canvas');
     c.width=90; c.height=i===0?52:36; c.id='prev-'+i; stack.appendChild(c);
   }
+  setupLimbo(stack, cfg.previewCount);
   drawPreviews();
 }
 function drawPreviews() {
+  const q = limboQueue(soloQueue, cfg.previewCount);
   for(let i=0;i<cfg.previewCount;i++) {
     const c=document.getElementById('prev-'+i);
-    if(c) drawMini(c.getContext('2d'),soloQueue[i]||null,c.width,c.height);
+    if(c) drawMini(c.getContext('2d'),q[i]||null,c.width,c.height);
   }
 }
 
@@ -287,12 +290,14 @@ function loop(ts) {
       dropAcc+=dt;
       if(dropAcc>getInterval()){dropAcc=0; piece.y++; onMove();}
     }
+    const { circleGrid, circlePiece } = getCircleOffsets(ts);
     board.draw({
       grid, piece,
       ghostY: (piece && cfg.ghostOpacity > 0) ? ghostY() : null,
       lockFlashing, lockBright,
       ghostOpacity: cfg.ghostOpacity,
       gridOn: cfg.gridOn, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth,
+      circleGrid, circlePiece,
     });
     drawPreviews(); drawHold();
   }
