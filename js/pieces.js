@@ -1,4 +1,4 @@
-import { COLS, ROWS, PKEYS, ROTATIONS } from './constants.js';
+import { PKEYS, ROTATIONS, COLS, ROWS } from './constants.js';
 
 export function mulberry32(seed) {
   return function() {
@@ -25,18 +25,23 @@ export function fillBag(b) {
   b.push(...arr);
 }
 
-export function mkGrid()  { return Array.from({length:ROWS}, () => Array(COLS).fill(null)); }
-
-export function mkPiece(k) {
-  const sh = ROTATIONS[k][0].map(r => [...r]); // always spawn at state 0
-  return { shape:sh, key:k, rot:0, x:Math.floor(COLS/2)-Math.floor(sh[0].length/2), y:0 };
+// cols/rows default to the standard constants; solo passes cfg values explicitly.
+export function mkGrid(cols = COLS, rows = ROWS) {
+  return Array.from({length:rows}, () => Array(cols).fill(null));
 }
 
+export function mkPiece(k, cols = COLS) {
+  const sh = ROTATIONS[k][0].map(r => [...r]); // always spawn at state 0
+  return { shape:sh, key:k, rot:0, x:Math.floor(cols/2)-Math.floor(sh[0].length/2), y:0 };
+}
+
+// Derive bounds from the actual grid so callers don't need to pass dimensions.
 export function collide(sh, x, y, g) {
+  const gRows = g.length, gCols = g[0]?.length ?? COLS;
   for (let r=0; r<sh.length; r++) for (let c=0; c<sh[r].length; c++) {
     if (!sh[r][c]) continue;
     const nx=x+c, ny=y+r;
-    if (nx<0||nx>=COLS||ny>=ROWS) return true;
+    if (nx<0||nx>=gCols||ny>=gRows) return true;
     if (ny>=0 && g[ny][nx]) return true;
   }
   return false;

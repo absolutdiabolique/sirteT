@@ -2,6 +2,7 @@ import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
 import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini, showCountdown } from './ui.js';
+import { playSfx, startMusic, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { getSocket, sendAttack } from './api.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
@@ -173,6 +174,7 @@ function initVsGame() {
   myBoard.draw({ grid:vsGrid,  piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   oppBoard.draw({ grid:oppGrid, piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   showCountdown(['vs-my-board-wrap','vs-opp-board-wrap'], () => {
+    startMusic('music/aperture.wav');
     vsSpawnNext();
     vsRunLoop=true; vsLastTime=performance.now();
     vsGameStartMs=performance.now();
@@ -235,26 +237,26 @@ export function vsTryRotate(ccw=false){
   const nr=((vsPiece.rot+(ccw?-1:1))+4)%4;
   const ns=ROTATIONS[vsPiece.key][nr].map(r=>[...r]);
   const dir=`${vsPiece.rot}>>${nr}`;
-  if(!collide(ns,vsPiece.x,vsPiece.y,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsOnMove();pushBoard();return;}
+  if(!collide(ns,vsPiece.x,vsPiece.y,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;playSfx('rotate.wav');vsOnMove();pushBoard();return;}
   if(cfg.kicks==='none') return;
   const table=vsPiece.key==='I'?SRS_I:SRS;
   const kicks=(table[dir]||[]).slice(1);
   for(const [dx,dy] of kicks){
-    if(!collide(ns,vsPiece.x+dx,vsPiece.y-dy,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsPiece.x+=dx;vsPiece.y-=dy;vsOnMove();pushBoard();return;}
+    if(!collide(ns,vsPiece.x+dx,vsPiece.y-dy,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsPiece.x+=dx;vsPiece.y-=dy;playSfx('rotate.wav');vsOnMove();pushBoard();return;}
   }
 }
 export function vsTryRotate180(){
   const nr=(vsPiece.rot+2)%4;
   const ns=ROTATIONS[vsPiece.key][nr].map(r=>[...r]);
-  if(!collide(ns,vsPiece.x,vsPiece.y,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsOnMove();pushBoard();return;}
+  if(!collide(ns,vsPiece.x,vsPiece.y,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;playSfx('rotate.wav');vsOnMove();pushBoard();return;}
   if(cfg.kicks==='none') return;
   const kicks180=[[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1]];
   for(const [dx,dy] of kicks180){
-    if(!collide(ns,vsPiece.x+dx,vsPiece.y-dy,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsPiece.x+=dx;vsPiece.y-=dy;vsOnMove();pushBoard();return;}
+    if(!collide(ns,vsPiece.x+dx,vsPiece.y-dy,vsGrid)){vsPiece.shape=ns;vsPiece.rot=nr;vsPiece.x+=dx;vsPiece.y-=dy;playSfx('rotate.wav');vsOnMove();pushBoard();return;}
   }
 }
-function vsMoveH(dx){if(!vsRunLoop||!vsPiece)return;if(!collide(vsPiece.shape,vsPiece.x+dx,vsPiece.y,vsGrid)){vsPiece.x+=dx;vsOnMove();pushBoard();}}
-export function vsHardDrop(){vsCancelLock();vsScore+=2*(vsGhostY()-vsPiece.y);vsPiece.y=vsGhostY();vsDoLock();}
+function vsMoveH(dx){if(!vsRunLoop||!vsPiece)return;if(!collide(vsPiece.shape,vsPiece.x+dx,vsPiece.y,vsGrid)){vsPiece.x+=dx;playSfx('move.wav');vsOnMove();pushBoard();}}
+export function vsHardDrop(){playSfx('harddrop.wav');vsCancelLock();vsScore+=2*(vsGhostY()-vsPiece.y);vsPiece.y=vsGhostY();vsDoLock();}
 export function vsDoHold(){
   if(cfg.holdMode==='none')return;
   if(cfg.holdMode==='normal'&&vsHoldUsed){showToast('Hold used');return;}
@@ -419,6 +421,7 @@ function updateOppBoard(data){
 }
 
 function vsGameOver(){
+  stopMusic();
   vsRunLoop=false; vsCancelLock(); cancelAnimationFrame(vsRafId);
   if(vsTimerInterval){clearInterval(vsTimerInterval);vsTimerInterval=null;}
   const socket = getSocket();
@@ -430,6 +433,7 @@ function vsGameOver(){
 }
 function handleVsWin(){
   if(!vsRunLoop)return;
+  stopMusic();
   vsRunLoop=false; vsCancelLock(); cancelAnimationFrame(vsRafId);
   document.getElementById('vs-overlay').style.display='flex';
   document.getElementById('vs-overlay-title').textContent='YOU WIN!';
@@ -438,6 +442,7 @@ function handleVsWin(){
 }
 
 export function stopVsGame(){
+  stopMusic();
   vsRunLoop=false; vsCancelLock(); cancelAnimationFrame(vsRafId);
   if(vsTimerInterval){clearInterval(vsTimerInterval);vsTimerInterval=null;}
   const socket = getSocket();

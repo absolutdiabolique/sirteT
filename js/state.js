@@ -2,13 +2,17 @@ import { DEFAULT_BINDS } from './constants.js';
 
 export const cfg = {
   mode:'marathon', subMode:null, ranked:false, practice:false,
+  boardWidth:10, boardHeight:20,
   gravMode:'leveled', gravStatic:1.0,
   das:167, arr:33, sdf:10,
   kicks:'srs', previewCount:5, holdMode:'normal',
-  ghostOpacity:0.30, gridOn:true, gridWidth:0.5, gridColor:'#222233', pieceOutline:false,
+  ghostOpacity:0.30, gridOn:true, gridWidth:0.5, gridColor:'#222233', pieceOutline:true,
+  sfxVolume:100, musicVolume:80,
+  attackSplash:true, motionBlurTrail:5, motionBlurIntensity:5, boardBounce:5, boardElasticity:8, dropTrailIntensity:5, disintegrate:true, chromaticAberration:false, chromaticIntensity:5, overhang:false,
   invisibleLocked:false,
   colorShiftBpm:120, limboBpm:120, drunkBpm:120, circlesBpm:120,
-  colorShift:false, limbo:false, drunk:false, circles:false
+  colorShift:false, limbo:false, drunk:false, circles:false,
+  acid:false, acidMeter:5
 };
 
 export const keybinds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
@@ -32,9 +36,11 @@ export function checkBind(e, action) {
 export function saveGlobal() {
   localStorage.setItem('sirtet_global', JSON.stringify({
     das:cfg.das, arr:cfg.arr, sdf:cfg.sdf, keybinds, pieceColors,
-    ghostOpacity:cfg.ghostOpacity, gridOn:cfg.gridOn, gridWidth:cfg.gridWidth, gridColor:cfg.gridColor, pieceOutline:cfg.pieceOutline,
+    sfxVolume:cfg.sfxVolume, musicVolume:cfg.musicVolume,
+    ghostOpacity:cfg.ghostOpacity, gridOn:cfg.gridOn, gridWidth:cfg.gridWidth, gridColor:cfg.gridColor, pieceOutline:cfg.pieceOutline, attackSplash:cfg.attackSplash, motionBlurTrail:cfg.motionBlurTrail, motionBlurIntensity:cfg.motionBlurIntensity, boardBounce:cfg.boardBounce, boardElasticity:cfg.boardElasticity, dropTrailIntensity:cfg.dropTrailIntensity, disintegrate:cfg.disintegrate, chromaticAberration:cfg.chromaticAberration, chromaticIntensity:cfg.chromaticIntensity,
     colorShiftBpm:cfg.colorShiftBpm, limboBpm:cfg.limboBpm, drunkBpm:cfg.drunkBpm, circlesBpm:cfg.circlesBpm,
-    colorShift:cfg.colorShift, limbo:cfg.limbo, drunk:cfg.drunk, circles:cfg.circles
+    colorShift:cfg.colorShift, limbo:cfg.limbo, drunk:cfg.drunk, circles:cfg.circles,
+    acid:cfg.acid, acidMeter:cfg.acidMeter
   }));
 }
 
@@ -51,7 +57,18 @@ export function loadGlobal() {
     if (s.gridOn        !== undefined) cfg.gridOn        = s.gridOn;
     if (s.gridWidth     !== undefined) cfg.gridWidth     = s.gridWidth;
     if (s.gridColor     !== undefined) cfg.gridColor     = s.gridColor;
-    if (s.pieceOutline  !== undefined) cfg.pieceOutline  = s.pieceOutline;
+    if (s.pieceOutline   !== undefined) cfg.pieceOutline   = s.pieceOutline;
+    if (s.attackSplash        !== undefined) cfg.attackSplash        = s.attackSplash;
+    if (s.motionBlurTrail     !== undefined) cfg.motionBlurTrail     = s.motionBlurTrail;
+    if (s.motionBlurIntensity !== undefined) cfg.motionBlurIntensity = s.motionBlurIntensity;
+    if (s.boardBounce         !== undefined) cfg.boardBounce         = s.boardBounce;
+    if (s.boardElasticity     !== undefined) cfg.boardElasticity     = s.boardElasticity;
+    if (s.sfxVolume           !== undefined) cfg.sfxVolume           = s.sfxVolume;
+    if (s.musicVolume         !== undefined) cfg.musicVolume         = s.musicVolume;
+    if (s.dropTrailIntensity  !== undefined) cfg.dropTrailIntensity  = s.dropTrailIntensity;
+    if (s.disintegrate          !== undefined) cfg.disintegrate          = s.disintegrate;
+    if (s.chromaticAberration   !== undefined) cfg.chromaticAberration   = s.chromaticAberration;
+    if (s.chromaticIntensity    !== undefined) cfg.chromaticIntensity    = s.chromaticIntensity;
     // migrate legacy single stupidBpm → per-effect BPMs
     const fallbackBpm = s.stupidBpm ?? 120;
     if (s.colorShiftBpm !== undefined) cfg.colorShiftBpm = s.colorShiftBpm; else if (s.stupidBpm !== undefined) cfg.colorShiftBpm = fallbackBpm;
@@ -62,6 +79,8 @@ export function loadGlobal() {
     if (s.limbo       !== undefined) cfg.limbo       = s.limbo;
     if (s.drunk       !== undefined) cfg.drunk       = s.drunk;
     if (s.circles     !== undefined) cfg.circles     = s.circles;
+    if (s.acid        !== undefined) cfg.acid        = s.acid;
+    if (s.acidMeter   !== undefined) cfg.acidMeter   = s.acidMeter;
   } catch(e) {}
 }
 

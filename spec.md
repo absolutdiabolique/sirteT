@@ -4,16 +4,28 @@
 
 ## 1. Overview
 
-sirteT is a falling-block puzzle game. Pieces (tetrominoes) fall from the top of a 10×20 grid. Players rotate and position pieces to complete horizontal lines, which are cleared and scored. The game includes solo modes, a vs-bot mode, a 1v1 multiplayer mode, an account system for cross-device stats, and a settings system.
+sirteT is a falling-block puzzle game. Pieces (tetrominoes) fall from the top of a configurable grid (standard 10×20). Players rotate and position pieces to complete horizontal lines, which are cleared and scored. The game includes solo modes, a vs-bot mode, a 1v1 multiplayer mode, an account system for cross-device stats, and a settings system.
 
 ---
 
 ## 2. Board & Pieces
 
 ### Board
-- 10 columns × 20 visible rows
+- Configurable width (4–20 columns) and height (4–100 rows). The standard size is **10 columns × 20 rows**, marked with a red asterisk in the Setup screen because it affects ranked records.
 - Hidden buffer rows above row 0 (pieces spawn there)
 - Cells are either empty or hold a color value
+- Pieces always spawn horizontally centered at the top of the board, regardless of board width.
+
+### Overhang
+When the board width is set to 4, an **Overhang** toggle appears in Setup. When enabled, two pre-filled cells (Z-piece color) are placed in the bottom rows at game start:
+
+```
+col:  0  1  2  3
+H-2:  .  .  #  #
+H-1:  .  .  .  #
+```
+
+This creates the classic 4-wide combo setup: the right column is already partially filled, so stacking pieces across the left three columns continuously completes lines and sustains a combo chain.
 
 ### Piece Set (7-bag)
 Pieces are generated using the **7-bag system**: all 7 tetrominoes are shuffled into a random order, then the next bag begins. This guarantees no tetromino droughts longer than 12 pieces.
@@ -166,6 +178,14 @@ Maximize garbage lines sent within a time limit. Sub-modes: **30s**, **1m**, **2
 ### Zen
 No gravity increase, no game over, infinite hold. Practice environment.
 
+### Combo Race
+A fixed-configuration timed mode. Selecting it in the Setup screen automatically locks the settings to:
+- Board size: 4 wide × 20 tall
+- Overhang: On (see below)
+- Gravity: Leveled, Kicks: SRS, Hold: Normal, Practice: Off
+
+The timer counts down from **30 seconds**. The objective is to achieve the **highest combo** within the time limit. Max combo is displayed live in the stats panel and shown prominently in the result overlay when time expires. The personal best max combo is saved to the Stats screen. Combo Race results are not ranked (no leaderboard sync).
+
 ### vs Bot
 Player competes against a local AI opponent. See section 14.
 
@@ -175,6 +195,9 @@ Real-time match against another player over Firebase. See section 15.
 ### Quick Play
 Always-open ranked free-for-all over Firebase. See section 16.
 
+### Custom Multi-Player Room
+2–8 players in a host-controlled private room over Firebase. See section 18.
+
 ---
 
 ## 9. Ranked Play
@@ -183,9 +206,10 @@ Sprint and Blitz results are saved to records only when played with **standard s
 - Gravity: Leveled
 - Kicks: SRS
 - Hold: Normal (once per piece)
+- Board Size: 10×20
 - Practice Mode: Off
 
-Settings that affect ranking show a red **\*** marker in the Setup screen. If non-standard settings are active, a warning is shown and results are not saved.
+Settings that affect ranking show a red **\*** marker in the Setup screen. If non-standard settings are active, a warning banner ("⚠ Non-standard settings — score won't count in records") is shown and results are not saved.
 
 ---
 
@@ -237,8 +261,8 @@ On any line clear that sends attack, a splash number appears over the board:
 
 - Displays **+N** where N is lines sent
 - Color scales: white (<3), purple (3–5), blue (6–9), gold (10+)
-- Clears within **1000ms** of the previous clear stack: the number increments in place
-- Fades out after 1800ms
+- **Stacking**: a new attack splash accumulates onto the existing one (total increments in place) only when **both** conditions are true: the player is in an active combo (at least 2 consecutive clears) **and** the new attack arrives within 1000ms of when the current splash appeared. Otherwise the old splash is replaced with a fresh one showing only the new value.
+- Fades out after ~900ms
 
 ---
 
@@ -247,8 +271,11 @@ On any line clear that sends attack, a splash number appears over the board:
 ### Overview
 The player competes against a local AI bot on two side-by-side boards. The match ends when either player tops out.
 
-### Bot AI — Diver Down
-The single available AI is **Diver Down**. It plays optimally using a multi-phase evaluation engine.
+### Bot AI
+Two AI evaluator versions are available, selectable in the vs Bot setup screen:
+
+- **Version 1 (Diver Down)** — the default evaluator. Uses a multi-phase placement scoring engine.
+- **Version 2** — an alternative evaluator with a different heuristic weighting, generally stronger on certain board states.
 
 ### Bot Speed
 Speed is set before the match in the vs Bot setup screen:
@@ -399,26 +426,190 @@ When a player tops out, an overlay appears on their board showing "YOU DIED" and
 
 ---
 
-## 17. Settings
+## 17. Visual Effects
+
+### Stupid Mode Effects
+Four optional visual effects ("stupid mode") can be enabled independently in Settings. Each effect runs on an independent BPM clock (30–500 BPM, default 120). A convenience **"Apply BPM to all"** input in Settings sets all four BPMs at once.
+
+| Effect       | What it does |
+|--------------|--------------|
+| Color Shift  | On each tick, cycles the displayed colors of all pieces through the piece color palette. |
+| Limbo        | On each tick, randomly reorders which pieces are shown in the preview panel (the actual queue order is unchanged — only the display is shuffled). |
+| Drunk        | On each tick, shifts the board and piece canvas horizontally by a random offset, producing a wobble effect. |
+| Circles      | Applies a continuous slow circular orbit to the board canvas and to the active piece independently, so both drift in loops. |
+
+Each effect has an independent **On/Off** toggle and its own **BPM** input displayed on the same row in the Settings screen.
+
+### Motion Blur
+A trail of blurred ghost images follows the active piece as it moves. Each ghost fades in opacity and increases in blur radius as it ages, rendered oldest-to-newest so the freshest entry sits on top.
+
+- **Trail length** (0–10, default 5): how long the trail persists. Duration = `setting × 40ms`; max entries = `setting + 2`. **Setting to 0 disables motion blur entirely** (no separate On/Off toggle).
+- **Trail intensity** (0–10, default 5): scales trail opacity. 5 = default; 10 ≈ double brightness. Setting to 0 also disables the effect.
+- On **hard drop**, trail entries are injected for each intermediate row the piece passed through, producing a vertical streak along the drop path.
+
+### Board Bounce
+When the active piece moves left, right, or is hard-dropped, the `#board-wrap` element shifts slightly in that direction then glides back to center using exponential decay (no spring oscillation — no overshoot).
+
+- **Bounciness** (0–10, default 5): displacement magnitude per input. 0 = no movement.
+- **Elasticity** (1–10, default 8): controls the decay rate. Low = snaps back quickly; high = drifts back slowly. Implemented as `position × decay` per frame where `decay = 0.70 + (elasticity / 10) × 0.22`.
+
+Hard drops use a 1.8× stronger impulse than lateral moves.
+
+### Drop Trails
+When a piece is hard-dropped and travels at least one row, vertical speed lines appear along the left and right outer edges of the piece, spanning the drop distance. Three parallel lines per side spread outward with decreasing opacity. The lines fade out over ~420ms.
+
+- **Intensity** (0–10, default 5): scales line opacity. **Setting to 0 disables drop trails entirely** (no separate On/Off toggle).
+
+### Disintegrate
+When enabled, each cell in a cleared line breaks apart and animates off the board individually. On clear, each cell is captured at its pixel position before the row is removed from the grid. Particles are then rendered each frame with:
+
+- **Directional drift**: each cell gets an independent random horizontal velocity (±0.04 px/ms) and downward velocity (0.01–0.08 px/ms), plus mild random gravitational acceleration, so cells fan out in slightly different directions.
+- **Brightness bloom**: cells bleach toward white over their lifetime (white overlay opacity scales linearly with progress, reaching up to 70%).
+- **Fade out**: alpha follows a power-decay curve (`pow(1 - progress, 1.4)`), so cells linger bright then vanish quickly at the end.
+
+Total particle lifetime is 700ms. Particles render on top of the grid after all other board content. The setting is a simple On/Off toggle in the **Visuals** section of Settings (**on by default**).
+
+### Acid
+A post-process effect applied to the board canvas each frame. When enabled, two distortions are layered:
+
+1. **Wave distortion** — The board canvas is read into an offscreen canvas and re-drawn in 2px-tall horizontal scanline strips. Each strip is offset horizontally by a dual-frequency sine function and vertically by a single-frequency sine, producing a fluid, morphing warp. Both horizontal terms use an animated phase that advances each frame; the vertical term uses a perpendicular phase offset.
+
+2. **Phosphor persistence** — An accumulation canvas (same size as the board) retains the previous frame's image, dimmed each frame by filling with `rgba(10, 10, 12, fadeAmt)` at `source-over`. The current distorted frame is then composited onto the accumulation canvas using `screen` blending (so the near-black board background becomes transparent and only bright piece colors accumulate). The final accumulated image is overlaid back onto the board canvas with `screen` blending at a set opacity, producing a glowing afterimage trail behind every piece.
+
+The **Acid Meter** (1–10, default 5) controls:
+- **Distortion amplitude**: scales with the meter value (stronger warp at higher settings).
+- **Persistence fade rate**: high meter = slower fade = longer afterimage trails (brighter, more saturated accumulation).
+- **Overlay opacity**: higher meter = brighter phosphor overlay.
+
+Acid is off by default and is found in the **Stupid** section of Settings. Both effects reset (accumulation canvas cleared) when a game stops.
+
+### Chromatic Aberration
+A post-process pixel-shift effect applied to the board canvas each frame. It splits the red and blue color channels horizontally, simulating lens fringing.
+
+- **Edge-weighted**: the channel offset scales with horizontal distance from the board center — near-zero at the center column, strongest at the left and right edges. Offset at column `x` = `(intensity/3) × |2x/w − 1|` pixels.
+- The red channel is shifted left; the blue channel is shifted right by the same amount. The green channel is unchanged.
+- Implemented with a pre-allocated pixel buffer (`Uint8ClampedArray`) to avoid per-frame heap allocation.
+- An **On/Off** toggle and an **Intensity** slider (1–10, default 5) are in the **Visuals** section of Settings. Off by default.
+
+---
+
+## 18. Sound System
+
+Audio is handled by `front/js/sound.js`, which is imported by all game modules.
+
+### Sound Effects
+
+One-shot sounds played via `playSfx(name)` (`new Audio(...)` fire-and-forget):
+
+| File                   | Trigger                                          |
+|------------------------|--------------------------------------------------|
+| `sfx/countdown.wav`    | Played immediately when a countdown begins       |
+| `sfx/harddrop.wav`     | Played on every hard drop                        |
+| `sfx/move.wav`         | Played when a piece moves left or right          |
+| `sfx/rotate.wav`       | Played on every rotation (including 180°)        |
+
+### Pitched Line-Clear Sound
+`clear.wav` is played via the Web Audio API (`playSfxPitched`) so its pitch can be shifted at playback time using `AudioBufferSourceNode.playbackRate`.
+
+- On each line clear, the playback rate is set to raise the pitch by **1 full tone (2 semitones) per combo count**, capped at **16 tones** above baseline.
+- Formula: `playbackRate = 2^(min(comboCount, 16) / 6)` — one full tone = 2 semitones = `2^(1/6)`.
+- The first clear in a sequence plays at normal pitch; each subsequent consecutive clear raises it by one more tone.
+- The decoded audio buffer is cached after the first load to avoid re-fetching.
+
+### Background Music
+
+`startMusic(src)` starts a looping track; `stopMusic()` stops and resets it. Only one track plays at a time — `startMusic` stops any current track before starting the new one.
+
+- `music/aperture.wav` starts at GO! in all game modes and stops when the game ends (top-out, win, or manual stop).
+
+### Countdown Timing
+
+The `showCountdown` function in `ui.js` uses exported constants from `sound.js` to control visual and audio timing:
+
+| Constant          | Default | Meaning                                               |
+|-------------------|---------|-------------------------------------------------------|
+| `CD_SFX_LEAD`     | 0 ms    | How early the SFX fires before the "3" appears        |
+| `CD_DELAY_3`      | 1000 ms | Duration of the "3" display                           |
+| `CD_DELAY_2`      | 1000 ms | Duration of the "2" display                           |
+| `CD_DELAY_1`      | 1000 ms | Duration of the "1" display                           |
+| `CD_GO_CALLBACK`  | 450 ms  | Delay after "GO!" before the game callback fires      |
+| `CD_GO_FADE_DUR`  | 2000 ms | Duration of the "GO!" overlay fade-out                |
+| `CD_GO_BLOOM_DUR` | `'3s'`  | CSS duration of the bloom animation on "GO!"          |
+
+The game timer starts only after the countdown callback fires — not during the countdown itself.
+
+---
+
+## 19. Custom Multi-Player Room
+
+### Overview
+A host creates a private room for 2–8 players. All players see a waiting-room lobby until the host starts the match.
+
+### Room Flow
+1. Host clicks **Create Room** and receives a short room code.
+2. Other players enter the code to join and appear in the waiting-room player list.
+3. The host clicks **Start** when ready; all clients transition simultaneously to the game screen.
+
+### Piece Sequence
+All players draw from the same seeded piece sequence (same seed stored in Firebase at room creation), so every player receives identical bags in identical order.
+
+### Attack & Garbage
+Attack and garbage mechanics are identical to 1v1 multiplayer (section 15). Each player's garbage bar shows their incoming queue. Garbage is applied one segment per piece lock.
+
+### Board Layout
+Each player sees their own board in the same layout as 1v1 and vs Bot:
+
+```
+[Next preview] [Hold] [Board + splashes] [Garbage bar]
+```
+
+Miniature opponent boards are displayed alongside the main board, updated from Firebase in real time.
+
+### Win Condition
+Last player standing wins. A player is eliminated when they top out.
+
+---
+
+## 20. Settings
 
 All settings persist via `localStorage`.
 
-| Setting         | Location | Description                                       |
-|-----------------|----------|---------------------------------------------------|
-| DAS             | Settings | Delayed auto-shift (0–500ms)                      |
-| ARR             | Settings | Auto repeat rate (0–200ms)                        |
-| SDF             | Settings | Soft drop factor (1–41×)                          |
-| Keybinds        | Settings | Up to 2 keys per action                           |
-| Piece Colors    | Settings | Individual color picker per piece                 |
-| Gravity Type    | Setup    | Leveled or Static                                 |
-| Static Speed    | Setup    | Speed multiplier for Static gravity (0.1–20×)     |
-| Kick System     | Setup    | SRS or None                                       |
-| Preview Count   | Setup    | 0–7 pieces shown (solo)                           |
-| Hold Mode       | Setup    | Normal / Infinite / None                          |
-| Ghost Opacity   | Setup    | 0–80%                                             |
-| Grid Lines      | Setup    | On/Off with width (0.5–3px) and color picker      |
-| Invisible Lock  | Setup    | Locked pieces become invisible                    |
-| Practice Mode   | Setup    | Enables in-game settings drawer and undo/redo     |
+| Setting              | Location | Description                                                                 |
+|----------------------|----------|-----------------------------------------------------------------------------|
+| DAS                  | Settings | Delayed auto-shift (0–500ms)                                                |
+| ARR                  | Settings | Auto repeat rate (0–200ms)                                                  |
+| SDF                  | Settings | Soft drop factor (1–41×)                                                    |
+| Keybinds             | Settings | Up to 2 keys per action                                                     |
+| Piece Colors         | Settings | Individual color picker per piece                                           |
+| Ghost Opacity        | Settings | 0–80%. Default: 30%.                                                        |
+| Piece Outline        | Settings | Draws a lighter-colored inner outline around each piece's silhouette (On/Off). Applies to falling, locked, ghost, and preview pieces. Default: On. |
+| Attack Splash Text   | Settings | On/Off. When off, attack-sent and garbage-cancel splash text is suppressed. Default: On. |
+| Trail Length         | Settings | 0–10. Duration and max entries of the motion blur trail. **0 disables motion blur.** Default: 5. |
+| Trail Intensity      | Settings | 0–10. Opacity multiplier for motion blur trail. Default: 5.                 |
+| Board Bounciness     | Settings | 0–10. How far the board shifts on piece movement. 0 = disabled. Default: 5. |
+| Board Elasticity     | Settings | 1–10. How slowly the board returns to center after a bounce. Default: 8.    |
+| Drop Trail Intensity | Settings | 0–10. Opacity of drop trail speed lines on hard drop. **0 disables drop trails.** Default: 5. |
+| Disintegrate         | Settings | On/Off. Cleared line cells fan out as fading, brightening particles. **Default: On.** |
+| Chromatic Aberration | Settings | On/Off. Splits red/blue channels horizontally with edge-weighted intensity. Default: Off. |
+| Chromatic Intensity  | Settings | 1–10. Controls the maximum channel offset at board edges. Default: 5.       |
+| Grid Lines           | Settings | On/Off with width (0.5–3px) and color picker                                |
+| Color Shift          | Settings | On/Off + BPM (30–500). Cycles piece colors on each tick.                    |
+| Limbo                | Settings | On/Off + BPM (30–500). Shuffles preview display order on each tick.         |
+| Drunk                | Settings | On/Off + BPM (30–500). Shifts board canvas horizontally on each tick.       |
+| Circles              | Settings | On/Off + BPM (30–500). Applies circular orbit motion to board and piece.    |
+| Apply BPM to all     | Settings | Sets Color Shift, Limbo, Drunk, and Circles BPM to a single value at once.  |
+| Acid                 | Settings | On/Off toggle. Applies wave distortion + phosphor persistence to the board. |
+| Acid Meter           | Settings | 1–10. Controls distortion strength, persistence fade rate, and overlay opacity. |
+| Gravity Type         | Setup    | Leveled or Static                                                           |
+| Static Speed         | Setup    | Speed multiplier for Static gravity (0.1–20×)                               |
+| Kick System          | Setup ★  | SRS or None. Non-standard setting; affects ranked records.                  |
+| Preview Count        | Setup    | 0–7 pieces shown (solo)                                                     |
+| Hold Mode            | Setup ★  | Normal / Infinite / None. Non-standard if not Normal.                       |
+| Board Width          | Setup ★  | 4–20 columns (range slider). Standard: 10. Affects ranked records.          |
+| Board Height         | Setup ★  | 4–100 rows (range slider). Standard: 20. Affects ranked records.            |
+| Overhang             | Setup    | Visible only when board width = 4. On/Off. Pre-fills bottom-right cells for 4-wide combo setup. Locked On in Combo Race. |
+| Invisible Lock       | Setup    | Locked pieces become invisible                                              |
+| Practice Mode        | Setup ★  | Enables in-game settings drawer and undo/redo. Disables ranked records.     |
 
 ### Practice Mode
 When enabled:
@@ -428,14 +619,15 @@ When enabled:
 
 ---
 
-## 18. Stats
+## 21. Stats
 
 Only personal bests are saved (one record per sub-mode).
 
-| Mode   | Sub-modes        | Metric     |
-|--------|------------------|------------|
-| Sprint | 20L, 40L, 100L   | Time (ms)  |
-| Blitz  | 30s, 1m, 2m      | Lines sent |
+| Mode        | Sub-modes      | Metric       |
+|-------------|----------------|--------------|
+| Sprint      | 20L, 40L, 100L | Time (ms)    |
+| Blitz       | 30s, 1m, 2m    | Lines sent   |
+| Combo Race  | 30s (fixed)    | Max combo    |
 
 Stats are displayed in a table showing all sub-modes side by side. Clearing stats removes all locally saved records.
 
@@ -448,7 +640,7 @@ When signed in to an account (see section 19), personal bests are synced to Fire
 
 ---
 
-## 19. Account System
+## 22. Account System
 
 ### Overview
 Players can create an account with an email and password. Accounts enable cross-device personal best sync and a persistent identity.
@@ -482,7 +674,62 @@ The Stats screen shows a status bar indicating whether the player is signed in (
 
 ---
 
-## 20. Technical Notes
+## 23. Replay System
+
+### Overview
+Solo games (all modes) are recorded as they are played. On game over or sprint completion, a **Save Replay** button appears in the result overlay. Clicking it downloads a timestamped `.json` file.
+
+### Recording
+- **Action-level**: each player input (move left/right, rotate CW/CCW/180, hard drop, soft drop, hold) is stored with a timestamp in milliseconds relative to `gameStartMs`.
+- **Piece sequence**: every piece dequeued is appended to a `pieces` array, ensuring deterministic playback.
+- **Settings snapshot**: the active game settings (mode, sub-mode, gravity, kicks, hold, etc.) are embedded so the replay is self-contained.
+
+### File Format (version 1)
+```json
+{
+  "version": 1,
+  "mode": "sprint",
+  "subMode": "40",
+  "settings": { "gravMode": "leveled", "kicks": "srs", ... },
+  "pieces": ["T", "I", "O", ...],
+  "events": [
+    { "t": 320, "a": "moveL" },
+    { "t": 480, "a": "rotCW" }
+  ],
+  "result": { "time": 58321, "lines": 40 }
+}
+```
+
+### Loading a Replay
+Drag and drop a replay `.json` file onto the game window. An overlay reads **"DROP TO REPLAY"** while dragging. On drop, the board shows a **"REPLAY LOADED"** overlay. Press Hard Drop to begin playback.
+
+### Playback
+- The replay's embedded settings are applied for the duration of playback (original settings are restored after).
+- The saved piece sequence is fed deterministically, bypassing the live 7-bag generator.
+- Events fire via `setTimeout` at their original recorded timestamps.
+- All player input is ignored during replay.
+- A **REPLAY** badge appears in the top-right of the board during playback.
+- On completion, a **"REPLAY DONE"** overlay is shown.
+
+### Speed Utility
+`random/speed_replay.py` accepts a replay `.json` file and a speed factor, dividing all event timestamps and `result.time` by the factor to produce a sped-up or slowed-down replay file. Output is written to `{basename}_x{factor}.json`.
+
+---
+
+## 24. Sound Settings
+
+Volume controls are in a dedicated **Sound** section of the Settings screen.
+
+| Setting      | Range  | Default | Description                                                              |
+|--------------|--------|---------|--------------------------------------------------------------------------|
+| SFX Volume   | 0–100% | 100%    | Volume applied to all one-shot sound effects at playback time.           |
+| Music Volume | 0–100% | 80%     | Volume applied to background music. Updates the live track immediately when changed. |
+
+Both values persist via `localStorage`. The music volume slider calls `setMusicVolume()` in `sound.js` to update the currently playing `_bgm` track in real time without restarting it.
+
+---
+
+## 25. Technical Notes
 
 - **Framework**: Vanilla HTML/JS, no build step
 - **Rendering**: HTML5 Canvas (2D context)
@@ -492,4 +739,5 @@ The Stats screen shows a status bar indicating whether the player is signed in (
 - **Font**: DM Mono (body), Space Mono (headers/numbers)
 - **Lock delay**: 1000ms with 15-move reset cap
 - **Tick rate**: `requestAnimationFrame` (~60fps)
-- **Grid**: 10×20, cell size 20px (solo), 28px (VS)
+- **Grid**: configurable (standard 10×20), cell size 20px (solo), 28px (VS)
+- **Browser support**: Chrome-based browsers recommended (Chrome, Edge, Brave, Arc, Opera, Vivaldi). A dismissable warning banner is shown on first load in non-Chrome browsers. Dismissal is persisted to `localStorage`.

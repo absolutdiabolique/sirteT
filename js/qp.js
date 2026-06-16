@@ -14,6 +14,7 @@ import {
   showToast, showAttackSplash, clearAttackSplash,
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
+import { playSfx, startMusic, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { currentUser, currentUsername } from './account.js';
 import { getSocket, sendAttack } from './api.js';
@@ -91,12 +92,12 @@ export function qpTryRotate(ccw = false) {
   const nr  = ((qpPiece.rot + (ccw ? -1 : 1)) + 4) % 4;
   const ns  = ROTATIONS[qpPiece.key][nr].map(r => [...r]);
   const dir = `${qpPiece.rot}>>${nr}`;
-  if (!collide(ns, qpPiece.x, qpPiece.y, qpGrid)) { qpPiece.shape = ns; qpPiece.rot = nr; qpOnMove(); return; }
+  if (!collide(ns, qpPiece.x, qpPiece.y, qpGrid)) { qpPiece.shape = ns; qpPiece.rot = nr; playSfx('rotate.wav'); qpOnMove(); return; }
   if (cfg.kicks === 'none') return;
   const table = qpPiece.key === 'I' ? SRS_I : SRS;
   for (const [dx, dy] of (table[dir] || []).slice(1)) {
     if (!collide(ns, qpPiece.x + dx, qpPiece.y - dy, qpGrid)) {
-      qpPiece.shape = ns; qpPiece.rot = nr; qpPiece.x += dx; qpPiece.y -= dy; qpOnMove(); return;
+      qpPiece.shape = ns; qpPiece.rot = nr; qpPiece.x += dx; qpPiece.y -= dy; playSfx('rotate.wav'); qpOnMove(); return;
     }
   }
 }
@@ -105,11 +106,11 @@ export function qpTryRotate180() {
   if (!qpRunning || !qpPiece || !qpAlive) return;
   const nr = (qpPiece.rot + 2) % 4;
   const ns = ROTATIONS[qpPiece.key][nr].map(r => [...r]);
-  if (!collide(ns, qpPiece.x, qpPiece.y, qpGrid)) { qpPiece.shape = ns; qpPiece.rot = nr; qpOnMove(); return; }
+  if (!collide(ns, qpPiece.x, qpPiece.y, qpGrid)) { qpPiece.shape = ns; qpPiece.rot = nr; playSfx('rotate.wav'); qpOnMove(); return; }
   if (cfg.kicks === 'none') return;
   for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1]]) {
     if (!collide(ns, qpPiece.x + dx, qpPiece.y - dy, qpGrid)) {
-      qpPiece.shape = ns; qpPiece.rot = nr; qpPiece.x += dx; qpPiece.y -= dy; qpOnMove(); return;
+      qpPiece.shape = ns; qpPiece.rot = nr; qpPiece.x += dx; qpPiece.y -= dy; playSfx('rotate.wav'); qpOnMove(); return;
     }
   }
 }
@@ -133,7 +134,7 @@ export function qpDoHold() {
 // ── Hard drop ─────────────────────────────────────────────────────────────────
 export function qpHardDrop() {
   if (!qpRunning || !qpPiece || !qpAlive) return;
-  qpCancelLock();
+  playSfx('harddrop.wav'); qpCancelLock();
   qpPiece.y = qpGhostY();
   qpDoLock();
 }
@@ -242,6 +243,7 @@ function qpSpawnNext() {
 
 // ── Top out ───────────────────────────────────────────────────────────────────
 function qpTopOut() {
+  stopMusic();
   qpAlive = false;
   const ov = document.getElementById('qp-dead-overlay');
   ov.style.display = 'flex';
@@ -348,7 +350,7 @@ function qpDrawPreviews() {
 // ── DAS / soft drop ───────────────────────────────────────────────────────────
 function qpMoveH(dx) {
   if (!qpRunning || !qpPiece || !qpAlive) return;
-  if (!collide(qpPiece.shape, qpPiece.x + dx, qpPiece.y, qpGrid)) { qpPiece.x += dx; qpOnMove(); }
+  if (!collide(qpPiece.shape, qpPiece.x + dx, qpPiece.y, qpGrid)) { qpPiece.x += dx; playSfx('move.wav'); qpOnMove(); }
 }
 
 export function qpStartDAS(dx) {
@@ -485,6 +487,7 @@ export function startQpGame() {
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   showCountdown('qp-board-wrap', () => {
+    startMusic('music/aperture.wav');
     qpSpawnNext();
     qpRunning = true;
     qpLastTime = performance.now();
@@ -494,6 +497,7 @@ export function startQpGame() {
 
 // ── Stop / Leave ──────────────────────────────────────────────────────────────
 export function stopQpGame() {
+  stopMusic();
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   qpCancelLock(); qpStopDAS(); qpStopSD();

@@ -5,7 +5,8 @@ import { computeBestMove as computeBestMove1 } from './ai.js';
 import { computeBestMove as computeBestMove2 } from './ai2.js';
 
 
-import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken, showCountdown } from './ui.js';
+import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken, lighten, showCountdown } from './ui.js';
+import { playSfx, startMusic, stopMusic } from './sound.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 let computeBestMove = computeBestMove1;
@@ -194,6 +195,7 @@ function botSpawnNext() {
 
 function botGameOver() {
   if (!botRunLoop) return;
+  stopMusic();
   botRunLoop = false;
   clearInterval(botMoveInterval); botMoveInterval = null;
   document.getElementById('bot-overlay').style.display = 'flex';
@@ -235,12 +237,12 @@ export function botTryRotate(ccw = false) {
   const nr = ((pPiece.rot + (ccw ? -1 : 1)) + 4) % 4;
   const ns = ROTATIONS[pPiece.key][nr].map(r => [...r]);
   const dir = `${pPiece.rot}>>${nr}`;
-  if (!collide(ns, pPiece.x, pPiece.y, pGrid)) { pPiece.shape = ns; pPiece.rot = nr; pOnMove(); return; }
+  if (!collide(ns, pPiece.x, pPiece.y, pGrid)) { pPiece.shape = ns; pPiece.rot = nr; playSfx('rotate.wav'); pOnMove(); return; }
   if (cfg.kicks === 'none') return;
   const table = pPiece.key === 'I' ? SRS_I : SRS;
   for (const [dx, dy] of (table[dir] || []).slice(1))
     if (!collide(ns, pPiece.x + dx, pPiece.y - dy, pGrid)) {
-      pPiece.shape = ns; pPiece.rot = nr; pPiece.x += dx; pPiece.y -= dy; pOnMove(); return;
+      pPiece.shape = ns; pPiece.rot = nr; pPiece.x += dx; pPiece.y -= dy; playSfx('rotate.wav'); pOnMove(); return;
     }
 }
 
@@ -248,17 +250,17 @@ export function botTryRotate180() {
   if (!botRunLoop || !pPiece) return;
   const nr = (pPiece.rot + 2) % 4;
   const ns = ROTATIONS[pPiece.key][nr].map(r => [...r]);
-  if (!collide(ns, pPiece.x, pPiece.y, pGrid)) { pPiece.shape = ns; pPiece.rot = nr; pOnMove(); return; }
+  if (!collide(ns, pPiece.x, pPiece.y, pGrid)) { pPiece.shape = ns; pPiece.rot = nr; playSfx('rotate.wav'); pOnMove(); return; }
   if (cfg.kicks === 'none') return;
   for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1]])
     if (!collide(ns, pPiece.x + dx, pPiece.y - dy, pGrid)) {
-      pPiece.shape = ns; pPiece.rot = nr; pPiece.x += dx; pPiece.y -= dy; pOnMove(); return;
+      pPiece.shape = ns; pPiece.rot = nr; pPiece.x += dx; pPiece.y -= dy; playSfx('rotate.wav'); pOnMove(); return;
     }
 }
 
 export function botHardDrop() {
   if (!botRunLoop || !pPiece) return;
-  pCancelLock(); pPiece.y = pGhostY(); pDoLock();
+  playSfx('harddrop.wav'); pCancelLock(); pPiece.y = pGhostY(); pDoLock();
 }
 
 export function botDoHold() {
@@ -366,6 +368,7 @@ function pSpawnNext() {
 
 function playerGameOver() {
   if (!botRunLoop) return;
+  stopMusic();
   botRunLoop = false;
   clearInterval(botMoveInterval); botMoveInterval = null;
   document.getElementById('bot-overlay').style.display = 'flex';
@@ -400,6 +403,87 @@ function drawCell(ctx, color, x, y, alpha = 1) {
   ctx.globalAlpha = 1;
 }
 
+// Clip-based inner outline for a piece shape (same technique as board.js).
+function drawShapeOutline(ctx, shape, ox, oy, color, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) ctx.rect((ox + c) * VS_SZ, (oy + r) * VS_SZ, VS_SZ, VS_SZ);
+  ctx.clip();
+  ctx.strokeStyle = color; ctx.lineWidth = 4;
+  ctx.beginPath();
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[r].length; c++) {
+      if (!shape[r][c]) continue;
+      const px = (ox + c) * VS_SZ, py = (oy + r) * VS_SZ;
+      if (!shape[r - 1]?.[c]) { ctx.moveTo(px,         py         ); ctx.lineTo(px + VS_SZ, py         ); }
+      if (!shape[r + 1]?.[c]) { ctx.moveTo(px,         py + VS_SZ ); ctx.lineTo(px + VS_SZ, py + VS_SZ ); }
+      if (!shape[r]?.[c - 1]) { ctx.moveTo(px,         py         ); ctx.lineTo(px,         py + VS_SZ ); }
+      if (!shape[r]?.[c + 1]) { ctx.moveTo(px + VS_SZ, py         ); ctx.lineTo(px + VS_SZ, py + VS_SZ ); }
+    }
+  }
+  ctx.stroke();
+  ctx.fillStyle = color;
+  const W = shape[0]?.length ?? 0;
+  for (let r = 0; r <= shape.length; r++) {
+    for (let c = 0; c <= W; c++) {
+      const TL = shape[r-1]?.[c-1], TR = shape[r-1]?.[c];
+      const BL = shape[r]?.[c-1],   BR = shape[r]?.[c];
+      const px = (ox + c) * VS_SZ, py = (oy + r) * VS_SZ;
+      if      ( TL &&  TR &&  BL && !BR) ctx.fillRect(px - 2, py - 2, 2, 2);
+      else if ( TL &&  TR && !BL &&  BR) ctx.fillRect(px,     py - 2, 2, 2);
+      else if ( TL && !TR &&  BL &&  BR) ctx.fillRect(px - 2, py,     2, 2);
+      else if (!TL &&  TR &&  BL &&  BR) ctx.fillRect(px,     py,     2, 2);
+    }
+  }
+  ctx.restore();
+}
+
+function drawBotGridOutlines(ctx, grid) {
+  const byColor = new Map();
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const col = grid[r][c];
+      if (!col) continue;
+      if (!byColor.has(col)) byColor.set(col, { lc: lighten(col), cells: [], segs: [] });
+      const e = byColor.get(col);
+      const px = c * VS_SZ, py = r * VS_SZ;
+      e.cells.push(px, py);
+      if (grid[r-1]?.[c] !== col) e.segs.push(px,          py,         px + VS_SZ, py         );
+      if (grid[r+1]?.[c] !== col) e.segs.push(px,          py + VS_SZ, px + VS_SZ, py + VS_SZ );
+      if (grid[r]?.[c-1] !== col) e.segs.push(px,          py,         px,         py + VS_SZ );
+      if (grid[r]?.[c+1] !== col) e.segs.push(px + VS_SZ,  py,         px + VS_SZ, py + VS_SZ );
+    }
+  }
+  ctx.lineWidth = 4;
+  for (const [col, { lc, cells, segs }] of byColor) {
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < cells.length; i += 2) ctx.rect(cells[i], cells[i+1], VS_SZ, VS_SZ);
+    ctx.clip();
+    ctx.strokeStyle = lc;
+    ctx.beginPath();
+    for (let i = 0; i < segs.length; i += 4) { ctx.moveTo(segs[i], segs[i+1]); ctx.lineTo(segs[i+2], segs[i+3]); }
+    ctx.stroke();
+    ctx.fillStyle = lc;
+    for (let r = 0; r <= ROWS; r++) {
+      for (let c = 0; c <= COLS; c++) {
+        const TL = grid[r-1]?.[c-1], TR = grid[r-1]?.[c];
+        const BL = grid[r]?.[c-1],   BR = grid[r]?.[c];
+        if (TL !== col && TR !== col && BL !== col && BR !== col) continue;
+        const px = c * VS_SZ, py = r * VS_SZ;
+        if      (TL===col && TR===col && BL===col && BR!==col) ctx.fillRect(px-2, py-2, 2, 2);
+        else if (TL===col && TR===col && BL!==col && BR===col) ctx.fillRect(px,   py-2, 2, 2);
+        else if (TL===col && TR!==col && BL===col && BR===col) ctx.fillRect(px-2, py,   2, 2);
+        else if (TL!==col && TR===col && BL===col && BR===col) ctx.fillRect(px,   py,   2, 2);
+      }
+    }
+    ctx.restore();
+  }
+}
+
 function drawGridLines(ctx, el) {
   ctx.fillStyle = '#0a0a0c'; ctx.fillRect(0, 0, el.width, el.height);
   ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 0.5;
@@ -422,21 +506,45 @@ function drawPlayerBoard() {
   drawGridLines(myCtx, myBoardEl);
   const drawGrid = () => {
     for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < COLS; c++)
-        if (pGrid[r][c]) drawCell(myCtx, pGrid[r][c], c, r);
+      for (let c = 0; c < COLS; c++) {
+        const col = pGrid[r][c];
+        if (!col) continue;
+        if (cfg.pieceOutline) { myCtx.fillStyle = col; myCtx.fillRect(c * VS_SZ, r * VS_SZ, VS_SZ, VS_SZ); }
+        else drawCell(myCtx, col, c, r);
+      }
+    if (cfg.pieceOutline) drawBotGridOutlines(myCtx, pGrid);
   };
   if (circleGrid) botDrawWrapped(myCtx, myBoardEl, circleGrid.x, circleGrid.y, drawGrid);
   else drawGrid();
   if (pPiece) {
     const gy = pGhostY();
+    const outColor = cfg.pieceOutline ? lighten(pieceColors[pPiece.key]) : null;
+    const ghostAlpha = cfg.ghostOpacity || 0.25;
     const drawPiece = () => {
-      for (let r = 0; r < pPiece.shape.length; r++)
-        for (let c = 0; c < pPiece.shape[r].length; c++)
-          if (pPiece.shape[r][c]) drawCell(myCtx, pieceColors[pPiece.key], pPiece.x + c, gy + r, cfg.ghostOpacity || 0.25);
+      if (outColor) {
+        myCtx.globalAlpha = ghostAlpha; myCtx.fillStyle = pieceColors[pPiece.key];
+        for (let r = 0; r < pPiece.shape.length; r++)
+          for (let c = 0; c < pPiece.shape[r].length; c++)
+            if (pPiece.shape[r][c]) myCtx.fillRect((pPiece.x+c)*VS_SZ, (gy+r)*VS_SZ, VS_SZ, VS_SZ);
+        myCtx.globalAlpha = 1;
+        drawShapeOutline(myCtx, pPiece.shape, pPiece.x, gy, outColor, ghostAlpha);
+      } else {
+        for (let r = 0; r < pPiece.shape.length; r++)
+          for (let c = 0; c < pPiece.shape[r].length; c++)
+            if (pPiece.shape[r][c]) drawCell(myCtx, pieceColors[pPiece.key], pPiece.x+c, gy+r, ghostAlpha);
+      }
       const col = pLockFlashing && !pLockBright ? darken(pieceColors[pPiece.key]) : pieceColors[pPiece.key];
-      for (let r = 0; r < pPiece.shape.length; r++)
-        for (let c = 0; c < pPiece.shape[r].length; c++)
-          if (pPiece.shape[r][c]) drawCell(myCtx, col, pPiece.x + c, pPiece.y + r);
+      if (outColor) {
+        myCtx.fillStyle = col;
+        for (let r = 0; r < pPiece.shape.length; r++)
+          for (let c = 0; c < pPiece.shape[r].length; c++)
+            if (pPiece.shape[r][c]) myCtx.fillRect((pPiece.x+c)*VS_SZ, (pPiece.y+r)*VS_SZ, VS_SZ, VS_SZ);
+        drawShapeOutline(myCtx, pPiece.shape, pPiece.x, pPiece.y, outColor);
+      } else {
+        for (let r = 0; r < pPiece.shape.length; r++)
+          for (let c = 0; c < pPiece.shape[r].length; c++)
+            if (pPiece.shape[r][c]) drawCell(myCtx, col, pPiece.x+c, pPiece.y+r);
+      }
     };
     if (circlePiece) botDrawWrapped(myCtx, myBoardEl, circlePiece.x, circlePiece.y, drawPiece);
     else drawPiece();
@@ -449,17 +557,32 @@ function drawBotBoard() {
   if (bGrid) {
     const drawGrid = () => {
       for (let r = 0; r < ROWS; r++)
-        for (let c = 0; c < COLS; c++)
-          if (bGrid[r][c]) drawCell(oppCtx, bGrid[r][c], c, r);
+        for (let c = 0; c < COLS; c++) {
+          const col = bGrid[r][c];
+          if (!col) continue;
+          if (cfg.pieceOutline) { oppCtx.fillStyle = col; oppCtx.fillRect(c * VS_SZ, r * VS_SZ, VS_SZ, VS_SZ); }
+          else drawCell(oppCtx, col, c, r);
+        }
+      if (cfg.pieceOutline) drawBotGridOutlines(oppCtx, bGrid);
     };
     if (circleGrid) botDrawWrapped(oppCtx, oppBoardEl, circleGrid.x, circleGrid.y, drawGrid);
     else drawGrid();
   }
   if (bPiece && botRunLoop) {
     const shape = ROTATIONS[bPiece.key][bTargetRot];
-    for (let r = 0; r < shape.length; r++)
-      for (let c = 0; c < shape[r].length; c++)
-        if (shape[r][c]) drawCell(oppCtx, pieceColors[bPiece.key], bTargetX + c, bTargetY + r, 0.55);
+    const col = pieceColors[bPiece.key];
+    if (cfg.pieceOutline) {
+      oppCtx.globalAlpha = 0.55; oppCtx.fillStyle = col;
+      for (let r = 0; r < shape.length; r++)
+        for (let c = 0; c < shape[r].length; c++)
+          if (shape[r][c]) oppCtx.fillRect((bTargetX+c)*VS_SZ, (bTargetY+r)*VS_SZ, VS_SZ, VS_SZ);
+      oppCtx.globalAlpha = 1;
+      drawShapeOutline(oppCtx, shape, bTargetX, bTargetY, lighten(col), 0.55);
+    } else {
+      for (let r = 0; r < shape.length; r++)
+        for (let c = 0; c < shape[r].length; c++)
+          if (shape[r][c]) drawCell(oppCtx, col, bTargetX+c, bTargetY+r, 0.55);
+    }
   }
 }
 
@@ -549,6 +672,11 @@ export function startBotGame(pps, aiVersion = 1) {
 
   // Build previews from queue before spawning (so countdown shows upcoming pieces)
   pEnsureQ(); buildPlayerPreviews();
+  // During countdown, pQueue[0] will spawn at GO — show pQueue[1..3] so preview matches game start
+  for (let i = 0; i < 3; i++) {
+    const cv = document.getElementById('bot-prev-' + i);
+    if (cv) drawMini(cv.getContext('2d'), pQueue[i + 1] || null, cv.width, cv.height);
+  }
   bEnsureQ(); buildBotPreviews();
   // Draw empty boards with grid visible behind countdown
   drawGridLines(myCtx, myBoardEl);
@@ -558,7 +686,8 @@ export function startBotGame(pps, aiVersion = 1) {
   cancelAnimationFrame(rafId);
 
   showCountdown(['bot-my-board-wrap','bot-opp-board-wrap'], () => {
-    pSpawnNext(); botSpawnNext();   // pieces spawn when GO! fires
+    startMusic('music/aperture.wav');
+    pSpawnNext(); botSpawnNext();
     botRunLoop = true;
     lastTime = performance.now();
     rafId = requestAnimationFrame(gameLoop);
@@ -607,7 +736,7 @@ let sdBotActive = false, sdBotInterval = null;
 
 function pMoveH(dx) {
   if (!botRunLoop || !pPiece) return;
-  if (!collide(pPiece.shape, pPiece.x + dx, pPiece.y, pGrid)) { pPiece.x += dx; pOnMove(); }
+  if (!collide(pPiece.shape, pPiece.x + dx, pPiece.y, pGrid)) { pPiece.x += dx; playSfx('move.wav'); pOnMove(); }
 }
 
 export function botStartDAS(dx) {

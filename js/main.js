@@ -1,5 +1,5 @@
 import { loadGlobal, cfg, keybinds, checkBind, saveGlobal } from './state.js';
-import { showScreen as _showScreen, drawMini } from './ui.js';
+import { showScreen as _showScreen, drawMini, showToast } from './ui.js';
 import { renderStats, setUploader } from './stats.js';
 import { initAuth, signUp, logIn, logOut, uploadPB,
   currentUser, currentUsername, changeUsername, deleteData, deleteAccount,
@@ -11,7 +11,8 @@ import { syncSettingsUI, updateHandlingSummary, buildKeybindTable, buildPieceCol
 import { startGame, togglePause, stopGame, running, paused,
   hardDrop, doHold, tryRotate, tryRotate180,
   startDAS, stopDAS, startSoftDrop, stopSD,
-  doUndo, doRedo, drawHold, buildPreviews } from './solo.js';
+  doUndo, doRedo, drawHold, buildPreviews,
+  isReplayMode, queueReplay, isReplayPending, beginPendingReplay } from './solo.js';
 import { vsRunning, vsRunLoop, vsPiece, stopVsGame, createRoom, joinRoom,
   startVsGame, leaveRoom, rematchGame, vsStartDAS, vsStopDAS, vsStartSD, vsStopSD,
   vsTryRotate, vsTryRotate180, vsHardDrop, vsDoHold } from './vs.js';
@@ -65,11 +66,19 @@ window.startVsGame   = startVsGame;
 window.leaveRoom     = leaveRoom;
 window.vsRematch     = rematchGame;
 window.botRematch    = botRematchGame;
-window.beginQpGame   = () => {
-  if (!currentUser()) { showToast('Sign in to play Quick Play'); showScreen('screen-account'); return; }
-  showScreen('screen-qp');
-  startQpGame();
-};
+function _requireAuth(label, fn) {
+  if (!currentUser()) {
+    showToast(`Sign in to play ${label}`);
+    showScreen('screen-account');
+    return;
+  }
+  fn();
+}
+
+window.beginBotSetup = () => _requireAuth('vs Bot',      () => showScreen('screen-bot-setup'));
+window.beginLobby    = () => _requireAuth('1v1 Rooms',   () => showScreen('screen-lobby'));
+window.beginMrLobby  = () => _requireAuth('Custom Room', () => showScreen('screen-mr-lobby'));
+window.beginQpGame   = () => _requireAuth('Quick Play',  () => { showScreen('screen-qp'); startQpGame(); });
 window.leaveQpGame   = () => { stopQpGame(); showScreen('screen-menu'); };
 window.createMrRoom          = createMrRoom;
 window.joinMrRoom            = joinMrRoom;
@@ -251,9 +260,13 @@ document.addEventListener('keydown', e => {
   const onMr   = document.getElementById('screen-mr').classList.contains('active');
 
   if (onGame) {
-    if (!running && checkBind(e,'hardDrop')) { startGame(); return; }
-    if (checkBind(e,'pause')) { if(running) togglePause(); return; }
+    if (!running && checkBind(e,'hardDrop')) {
+      if (isReplayPending()) { beginPendingReplay(); return; }
+      if (!isReplayMode())   { startGame(); return; }
+    }
+    if (checkBind(e,'pause')) { if(running && !isReplayMode()) togglePause(); return; }
     if (!running||paused) return;
+    if (isReplayMode()) return;
     if (checkBind(e,'hardDrop'))   { hardDrop();       return; }
     if (checkBind(e,'hold'))       { doHold();         return; }
     if (checkBind(e,'rotateCW'))   { tryRotate(false); return; }
@@ -358,6 +371,31 @@ initAuth(async (user, username) => {
   updateAuthBar(user, username);
   refreshAccountScreen();
   if (document.getElementById('screen-stats').classList.contains('active')) renderStats();
+});
+
+// ── Replay drag-and-drop ──────────────────────────────────────
+const _dragOverlay = document.getElementById('drag-overlay');
+window.addEventListener('dragenter', () => { if (_dragOverlay) _dragOverlay.classList.add('active'); });
+window.addEventListener('dragleave', e => {
+  if (e.relatedTarget === null && _dragOverlay) _dragOverlay.classList.remove('active');
+});
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  if (_dragOverlay) _dragOverlay.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.name.endsWith('.json')) { showToast('Drop a .json replay file'); return; }
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      const replay = JSON.parse(evt.target.result);
+      if (replay.version !== 1 || !Array.isArray(replay.pieces) || !Array.isArray(replay.events)) {
+        showToast('Invalid replay file'); return;
+      }
+      queueReplay(replay);
+    } catch { showToast('Could not read replay'); }
+  };
+  reader.readAsText(file);
 });
 
 // Initial blank canvas draws

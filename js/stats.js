@@ -27,6 +27,14 @@ export function recordBlitzScore(lines, subKey) {
   }
 }
 
+export function recordComboRaceScore(maxCombo) {
+  const s = loadStats();
+  if (!s.combo_race || maxCombo > s.combo_race.maxCombo) {
+    s.combo_race = { maxCombo, date: new Date().toISOString() };
+    saveStats(s);
+  }
+}
+
 export function renderSprintHistory() {
   const s = loadStats();
   ['20','40','100'].forEach(sub => {
@@ -51,7 +59,18 @@ export function renderBlitzHistory() {
   });
 }
 
+export function renderComboRaceHistory() {
+  const s = loadStats();
+  const el = document.getElementById('combo-race-best');
+  if (!el) return;
+  const rec = s.combo_race;
+  el.textContent = rec ? rec.maxCombo + ' combo' : '—';
+  el.style.fontFamily = rec ? "'Space Mono', monospace" : '';
+  el.style.color = rec ? 'var(--accent2)' : 'var(--muted)';
+}
+
 export function renderStats() {
   renderSprintHistory();
   renderBlitzHistory();
+  renderComboRaceHistory();
 }

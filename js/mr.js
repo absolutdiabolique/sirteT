@@ -19,6 +19,7 @@ import {
   showToast, showAttackSplash, clearAttackSplash,
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
+import { playSfx, startMusic, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { currentUser, currentUsername } from './account.js';
 import { getSocket, sendAttack } from './api.js';
@@ -238,6 +239,7 @@ function initMrGame() {
   mrRunning = false;
   cancelAnimationFrame(mrRafId);
   showCountdown('mr-board-wrap', () => {
+    startMusic('music/aperture.wav');
     mrSpawnNext();
     mrRunning  = true;
     mrLastTime = performance.now();
@@ -286,12 +288,12 @@ export function mrTryRotate(ccw = false) {
   const nr  = ((mrPiece.rot + (ccw ? -1 : 1)) + 4) % 4;
   const ns  = ROTATIONS[mrPiece.key][nr].map(r => [...r]);
   const dir = `${mrPiece.rot}>>${nr}`;
-  if (!collide(ns, mrPiece.x, mrPiece.y, mrGrid)) { mrPiece.shape = ns; mrPiece.rot = nr; mrOnMove(); return; }
+  if (!collide(ns, mrPiece.x, mrPiece.y, mrGrid)) { mrPiece.shape = ns; mrPiece.rot = nr; playSfx('rotate.wav'); mrOnMove(); return; }
   if (cfg.kicks === 'none') return;
   const table = mrPiece.key === 'I' ? SRS_I : SRS;
   for (const [dx, dy] of (table[dir] || []).slice(1)) {
     if (!collide(ns, mrPiece.x + dx, mrPiece.y - dy, mrGrid)) {
-      mrPiece.shape = ns; mrPiece.rot = nr; mrPiece.x += dx; mrPiece.y -= dy; mrOnMove(); return;
+      mrPiece.shape = ns; mrPiece.rot = nr; mrPiece.x += dx; mrPiece.y -= dy; playSfx('rotate.wav'); mrOnMove(); return;
     }
   }
 }
@@ -299,21 +301,21 @@ export function mrTryRotate180() {
   if (!mrRunning || !mrPiece || !mrAlive) return;
   const nr = (mrPiece.rot + 2) % 4;
   const ns = ROTATIONS[mrPiece.key][nr].map(r => [...r]);
-  if (!collide(ns, mrPiece.x, mrPiece.y, mrGrid)) { mrPiece.shape = ns; mrPiece.rot = nr; mrOnMove(); return; }
+  if (!collide(ns, mrPiece.x, mrPiece.y, mrGrid)) { mrPiece.shape = ns; mrPiece.rot = nr; playSfx('rotate.wav'); mrOnMove(); return; }
   if (cfg.kicks === 'none') return;
   for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1]]) {
     if (!collide(ns, mrPiece.x + dx, mrPiece.y - dy, mrGrid)) {
-      mrPiece.shape = ns; mrPiece.rot = nr; mrPiece.x += dx; mrPiece.y -= dy; mrOnMove(); return;
+      mrPiece.shape = ns; mrPiece.rot = nr; mrPiece.x += dx; mrPiece.y -= dy; playSfx('rotate.wav'); mrOnMove(); return;
     }
   }
 }
 function mrMoveH(dx) {
   if (!mrRunning || !mrPiece || !mrAlive) return;
-  if (!collide(mrPiece.shape, mrPiece.x + dx, mrPiece.y, mrGrid)) { mrPiece.x += dx; mrOnMove(); }
+  if (!collide(mrPiece.shape, mrPiece.x + dx, mrPiece.y, mrGrid)) { mrPiece.x += dx; playSfx('move.wav'); mrOnMove(); }
 }
 export function mrHardDrop() {
   if (!mrRunning || !mrPiece || !mrAlive) return;
-  mrCancelLock(); mrPiece.y = mrGhostY(); mrDoLock();
+  playSfx('harddrop.wav'); mrCancelLock(); mrPiece.y = mrGhostY(); mrDoLock();
 }
 export function mrDoHold() {
   if (!mrRunning || !mrAlive) return;
@@ -430,6 +432,7 @@ function mrClearLines(spin, key) {
 
 // ── Top out ────────────────────────────────────────────────────────────────────────
 function mrTopOut() {
+  stopMusic();
   mrAlive = false;
   const ov = document.getElementById('mr-dead-overlay');
   ov.style.display = 'flex';
@@ -614,6 +617,7 @@ function mrLoop(ts) {
 
 // ── Stop / Leave ───────────────────────────────────────────────────────────────────
 export function stopMrGame() {
+  stopMusic();
   mrRunning = false;
   cancelAnimationFrame(mrRafId);
   mrCancelLock(); mrStopDAS(); mrStopSD();

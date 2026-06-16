@@ -1,4 +1,3 @@
-import { COLS, ROWS } from './constants.js';
 import { pieceColors, cfg } from './state.js';
 import { darken, lighten } from './ui.js';
 
@@ -24,7 +23,7 @@ export function createBoard(canvasEl, sz) {
     ctx.globalAlpha = 1;
   }
 
-  // Fill piece cells with no inter-cell gap (full sz×sz per cell).
+  // Fill piece cells seamlessly (no 1px gap between adjacent cells).
   function drawPieceSolid(shape, ox, oy, color, alpha = 1) {
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
@@ -34,30 +33,90 @@ export function createBoard(canvasEl, sz) {
     ctx.globalAlpha = 1;
   }
 
-  // Trace exterior edges of a piece shape, inset 2px from the boundary so the
-  // outline sits inside the filled area rather than on top of the gap between cells.
-  const INSET = 2;
   function drawOutline(shape, ox, oy, color, alpha = 1) {
     ctx.save();
     ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let r = 0; r < shape.length; r++)
+      for (let c = 0; c < shape[r].length; c++)
+        if (shape[r][c]) ctx.rect((ox + c) * sz, (oy + r) * sz, sz, sz);
+    ctx.clip();
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = 'round';
+    ctx.lineWidth = 4;
     ctx.beginPath();
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
         if (!shape[r][c]) continue;
         const px = (ox + c) * sz, py = (oy + r) * sz;
-        const x0 = px + INSET, x1 = px + sz - INSET;
-        const y0 = py + INSET, y1 = py + sz - INSET;
-        if (!shape[r - 1]?.[c]) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); } // top
-        if (!shape[r + 1]?.[c]) { ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); } // bottom
-        if (!shape[r]?.[c - 1]) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); } // left
-        if (!shape[r]?.[c + 1]) { ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); } // right
+        if (!shape[r - 1]?.[c]) { ctx.moveTo(px, py);      ctx.lineTo(px + sz, py);      }
+        if (!shape[r + 1]?.[c]) { ctx.moveTo(px, py + sz); ctx.lineTo(px + sz, py + sz); }
+        if (!shape[r]?.[c - 1]) { ctx.moveTo(px, py);      ctx.lineTo(px, py + sz);      }
+        if (!shape[r]?.[c + 1]) { ctx.moveTo(px + sz, py); ctx.lineTo(px + sz, py + sz); }
       }
     }
     ctx.stroke();
+    // Fill 2×2 gaps at 270° concave corners (where butt-capped stroke ends don't meet)
+    ctx.fillStyle = color;
+    const W = shape[0]?.length ?? 0;
+    for (let r = 0; r <= shape.length; r++) {
+      for (let c = 0; c <= W; c++) {
+        const TL = shape[r-1]?.[c-1], TR = shape[r-1]?.[c];
+        const BL = shape[r]?.[c-1],   BR = shape[r]?.[c];
+        const px = (ox + c) * sz, py = (oy + r) * sz;
+        if      ( TL &&  TR &&  BL && !BR) ctx.fillRect(px - 2, py - 2, 2, 2);
+        else if ( TL &&  TR && !BL &&  BR) ctx.fillRect(px,     py - 2, 2, 2);
+        else if ( TL && !TR &&  BL &&  BR) ctx.fillRect(px - 2, py,     2, 2);
+        else if (!TL &&  TR &&  BL &&  BR) ctx.fillRect(px,     py,     2, 2);
+      }
+    }
     ctx.restore();
+  }
+
+  // Inner outlines for locked grid cells. Per-color clipping prevents strokes from
+  // one piece bleeding into adjacent cells of a different piece.
+  function drawGridOutlines(grid) {
+    const numRows = grid.length;
+    const numCols = grid[0]?.length ?? 0;
+    const byColor = new Map();
+    for (let r = 0; r < numRows; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const col = grid[r][c];
+        if (!col || col === '__inv__') continue;
+        if (!byColor.has(col)) byColor.set(col, { lc: lighten(col), cells: [], segs: [] });
+        const e = byColor.get(col);
+        const px = c * sz, py = r * sz;
+        e.cells.push(px, py);
+        if (grid[r-1]?.[c] !== col) e.segs.push(px,      py,      px + sz, py);
+        if (grid[r+1]?.[c] !== col) e.segs.push(px,      py + sz, px + sz, py + sz);
+        if (grid[r]?.[c-1] !== col) e.segs.push(px,      py,      px,      py + sz);
+        if (grid[r]?.[c+1] !== col) e.segs.push(px + sz, py,      px + sz, py + sz);
+      }
+    }
+    ctx.lineWidth = 4;
+    for (const [col, { lc, cells, segs }] of byColor) {
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < cells.length; i += 2) ctx.rect(cells[i], cells[i+1], sz, sz);
+      ctx.clip();
+      ctx.strokeStyle = lc;
+      ctx.beginPath();
+      for (let i = 0; i < segs.length; i += 4) { ctx.moveTo(segs[i], segs[i+1]); ctx.lineTo(segs[i+2], segs[i+3]); }
+      ctx.stroke();
+      ctx.fillStyle = lc;
+      for (let r = 0; r <= numRows; r++) {
+        for (let c = 0; c <= numCols; c++) {
+          const TL = grid[r-1]?.[c-1], TR = grid[r-1]?.[c];
+          const BL = grid[r]?.[c-1],   BR = grid[r]?.[c];
+          if (TL !== col && TR !== col && BL !== col && BR !== col) continue;
+          const px = c * sz, py = r * sz;
+          if      (TL===col && TR===col && BL===col && BR!==col) ctx.fillRect(px-2, py-2, 2, 2);
+          else if (TL===col && TR===col && BL!==col && BR===col) ctx.fillRect(px,   py-2, 2, 2);
+          else if (TL===col && TR!==col && BL===col && BR===col) ctx.fillRect(px-2, py,   2, 2);
+          else if (TL!==col && TR===col && BL===col && BR===col) ctx.fillRect(px,   py,   2, 2);
+        }
+      }
+      ctx.restore();
+    }
   }
 
   return {
@@ -72,8 +131,11 @@ export function createBoard(canvasEl, sz) {
       gridColor    = 'rgba(255,255,255,0.04)',
       gridWidth    = 0.5,
       targetPiece  = null,
-      circleGrid   = null,   // {x,y} px offset for locked cells — wrapped at canvas edges
-      circlePiece  = null,   // {x,y} px offset for active piece + ghost — wrapped at canvas edges
+      circleGrid   = null,
+      circlePiece  = null,
+      motionTrail   = null,
+      dropLines     = null,
+      disintegrate  = null,
     } = {}) {
       ctx.fillStyle = '#0a0a0c';
       ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
@@ -81,16 +143,31 @@ export function createBoard(canvasEl, sz) {
       if (gridOn) {
         ctx.strokeStyle = gridColor;
         ctx.lineWidth = gridWidth;
-        for (let r = 0; r <= ROWS; r++) {
-          ctx.beginPath(); ctx.moveTo(0, r * sz); ctx.lineTo(COLS * sz, r * sz); ctx.stroke();
+        const gW = canvasEl.width, gH = canvasEl.height;
+        const nCols = Math.round(gW / sz), nRows = Math.round(gH / sz);
+        for (let r = 0; r <= nRows; r++) {
+          ctx.beginPath(); ctx.moveTo(0, r * sz); ctx.lineTo(gW, r * sz); ctx.stroke();
         }
-        for (let c = 0; c <= COLS; c++) {
-          ctx.beginPath(); ctx.moveTo(c * sz, 0); ctx.lineTo(c * sz, ROWS * sz); ctx.stroke();
+        for (let c = 0; c <= nCols; c++) {
+          ctx.beginPath(); ctx.moveTo(c * sz, 0); ctx.lineTo(c * sz, gH); ctx.stroke();
         }
       }
 
       if (grid) {
-        const fn = () => { for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) drawCell(grid[r][c], c, r); };
+        const fn = () => {
+          for (let r = 0; r < grid.length; r++)
+            for (let c = 0; c < grid[r].length; c++) {
+              const col = grid[r][c];
+              if (!col || col === '__inv__') continue;
+              if (cfg.pieceOutline) {
+                ctx.fillStyle = col;
+                ctx.fillRect(c * sz, r * sz, sz, sz);
+              } else {
+                drawCell(col, c, r);
+              }
+            }
+          if (cfg.pieceOutline) drawGridOutlines(grid);
+        };
         if (circleGrid) drawWrapped(ctx, circleGrid.x, circleGrid.y, canvasEl.width, canvasEl.height, fn);
         else fn();
       }
@@ -125,6 +202,14 @@ export function createBoard(canvasEl, sz) {
                   if (piece.shape[r][c]) drawCell(pieceColors[piece.key], piece.x + c, ghostY + r, ghostOpacity);
             }
           }
+          if (motionTrail && motionTrail.length > 0) {
+            for (const e of [...motionTrail].reverse()) {
+              ctx.save();
+              ctx.filter = `blur(${e.blur.toFixed(1)}px)`;
+              drawPieceSolid(e.shape, e.x, e.y, pieceColors[e.key], e.alpha);
+              ctx.restore();
+            }
+          }
           const col = lockFlashing && !lockBright ? darken(pieceColors[piece.key]) : pieceColors[piece.key];
           if (outColor) {
             drawPieceSolid(piece.shape, piece.x, piece.y, col);
@@ -137,6 +222,45 @@ export function createBoard(canvasEl, sz) {
         };
         if (circlePiece) drawWrapped(ctx, circlePiece.x, circlePiece.y, canvasEl.width, canvasEl.height, fn);
         else fn();
+      }
+
+      if (dropLines && dropLines.length > 0) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const dl of dropLines) {
+          if (dl.alpha <= 0) continue;
+          const lc = lighten(dl.color);
+          // Three lines per side, spreading outward, each dimmer
+          const offsets = [0, 3, 6];
+          const alphas  = [1, 0.5, 0.22];
+          const widths  = [2, 1.5, 1];
+          for (let i = 0; i < 3; i++) {
+            const ox = dl.side * offsets[i];
+            ctx.globalAlpha = dl.alpha * alphas[i];
+            ctx.strokeStyle = i === 0 ? lc : dl.color;
+            ctx.lineWidth   = widths[i];
+            ctx.beginPath();
+            ctx.moveTo(dl.x + ox, dl.y1);
+            ctx.lineTo(dl.x + ox, dl.y2);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+
+      if (disintegrate && disintegrate.length > 0) {
+        ctx.save();
+        for (const p of disintegrate) {
+          if (p.alpha <= 0) continue;
+          // Blend from original color toward white as brightFactor rises 0→1
+          ctx.globalAlpha = p.alpha * (1 - p.brightFactor);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x + 1, p.y + 1, sz - 2, sz - 2);
+          ctx.globalAlpha = p.alpha * p.brightFactor;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(p.x + 1, p.y + 1, sz - 2, sz - 2);
+        }
+        ctx.restore();
       }
     }
   };
