@@ -7,7 +7,9 @@ import { playSfx, playSfxPitched, startMusic, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { loadStats, saveStats, recordSprintTime, recordBlitzScore, recordComboRaceScore } from './stats.js';
 import { startRecording, markRecordingStart, recordPiece, recordAction, finishRecording,
-         downloadReplay, scheduleReplayEvents, stopReplay } from './replay.js';
+         downloadReplay, scheduleReplayEvents, stopReplay, verifyReplayIntegrity } from './replay.js';
+import { verifyReplay } from './api.js';
+import { currentUsername } from './account.js';
 
 // Canvas setup
 const boardEl = document.getElementById('board');
@@ -162,6 +164,11 @@ let _replayBag       = null;   // piece source for replay
 let _pendingEvents   = null;   // events to schedule at game start
 let _replaySavedCfg  = null;   // physics cfg snapshot to restore after replay
 let _lastReplay      = null;   // most recent finished replay (for save button)
+function _finishRecording(result) {
+  const r = finishRecording(result);
+  if (r) { const u = currentUsername(); if (u) r.creator = u; }
+  return r;
+}
 let _queuedReplay    = null;   // replay loaded but not yet started
 
 export function isReplayMode()    { return _isReplayMode; }
@@ -193,25 +200,31 @@ function _onReplayEnd() {
   if (_replaySavedCfg) { Object.assign(cfg, _replaySavedCfg); _replaySavedCfg = null; }
   const badge = document.getElementById('replay-badge');
   if (badge) badge.style.display = 'none';
+  const vbadge = document.getElementById('verified-badge');
+  if (vbadge) { vbadge.style.display = 'none'; vbadge.style.background = ''; vbadge.textContent = '✓ VERIFIED'; }
 }
 
 export function loadAndPlayReplay(replay) {
   _replaySavedCfg = {
     mode: cfg.mode, subMode: cfg.subMode, ranked: cfg.ranked, practice: cfg.practice,
     gravMode: cfg.gravMode, gravStatic: cfg.gravStatic, sdf: cfg.sdf,
-    kicks: cfg.kicks, holdMode: cfg.holdMode, previewCount: cfg.previewCount
+    kicks: cfg.kicks, holdMode: cfg.holdMode, previewCount: cfg.previewCount,
+    boardWidth: cfg.boardWidth, boardHeight: cfg.boardHeight, overhang: cfg.overhang
   };
   cfg.mode    = replay.mode;
   cfg.subMode = replay.subMode ?? null;
   cfg.ranked  = false;
   cfg.practice = false;
   const s = replay.settings || {};
-  if (s.gravMode    !== undefined) cfg.gravMode    = s.gravMode;
-  if (s.gravStatic  !== undefined) cfg.gravStatic  = s.gravStatic;
-  if (s.sdf         !== undefined) cfg.sdf         = s.sdf;
-  if (s.kicks       !== undefined) cfg.kicks       = s.kicks;
-  if (s.holdMode    !== undefined) cfg.holdMode    = s.holdMode;
+  if (s.gravMode     !== undefined) cfg.gravMode     = s.gravMode;
+  if (s.gravStatic   !== undefined) cfg.gravStatic   = s.gravStatic;
+  if (s.sdf          !== undefined) cfg.sdf          = s.sdf;
+  if (s.kicks        !== undefined) cfg.kicks        = s.kicks;
+  if (s.holdMode     !== undefined) cfg.holdMode     = s.holdMode;
   if (s.previewCount !== undefined) cfg.previewCount = s.previewCount;
+  cfg.boardWidth  = s.boardWidth  ?? 10;
+  cfg.boardHeight = s.boardHeight ?? 20;
+  cfg.overhang    = s.overhang    ?? false;
   _isReplayMode  = true;
   _replayBag     = [...replay.pieces];
   _pendingEvents = replay.events;
@@ -219,6 +232,27 @@ export function loadAndPlayReplay(replay) {
   startGame();
   const badge = document.getElementById('replay-badge');
   if (badge) badge.style.display = 'inline';
+  const vbadge = document.getElementById('verified-badge');
+  if (vbadge) {
+    if (replay.verified?.id) {
+      vbadge.style.display = 'inline';
+      vbadge.textContent = 'VERIFYING…';
+      vbadge.style.background = '#555';
+      verifyReplayIntegrity(replay).then(result => {
+        if (result === 'ok') {
+          vbadge.textContent = '✓ VERIFIED';
+          vbadge.style.background = '#16a34a';
+        } else if (result === 'tampered') {
+          vbadge.textContent = '✗ TAMPERED';
+          vbadge.style.background = '#dc2626';
+        } else {
+          vbadge.style.display = 'none';
+        }
+      });
+    } else {
+      vbadge.style.display = 'none';
+    }
+  }
 }
 
 // Dispatch a recorded action during playback
@@ -468,11 +502,12 @@ function completeSprint() {
   }
 
   if (cfg.ranked) recordSprintTime(elapsed, cfg.subMode || '40');
-  _lastReplay = finishRecording({ outcome: 'sprint', lines, time: Math.round(elapsed) });
-  const saveBtn = _lastReplay ? `<button class="btn replay-save-btn" style="margin-top:4px;">Save Replay</button>` : '';
+  _lastReplay = _finishRecording({ outcome: 'sprint', lines, time: Math.round(elapsed) });
+  const verifyBtn = _lastReplay && currentUsername() ? `<button class="btn replay-verify-btn">Verify &amp; Save</button>` : '';
+  const saveBtns = _lastReplay ? `<div style="display:flex;gap:6px;margin-top:4px;"><button class="btn replay-save-btn">Save Replay</button>${verifyBtn}</div>` : '';
   const ranked_note = cfg.ranked ? '' : '<div style="font-size:10px;color:var(--warn);margin-top:4px;">non-standard settings — not ranked</div>';
   const ov = document.getElementById('overlay');
-  ov.innerHTML = `<h2 style="color:var(--accent2)">SPRINT DONE</h2><div class="time-display">${fmtTime(elapsed)}</div>${ranked_note}${saveBtn}<div class="sub">press hard drop to restart</div>`;
+  ov.innerHTML = `<h2 style="color:var(--accent2)">SPRINT DONE</h2><div class="time-display">${fmtTime(elapsed)}</div>${ranked_note}${saveBtns}<div class="sub">press hard drop to restart</div>`;
   ov.style.display = 'flex';
 }
 
@@ -747,23 +782,24 @@ export function triggerGameOver() {
     return;
   }
 
-  _lastReplay = finishRecording({
+  _lastReplay = _finishRecording({
     outcome: cfg.mode === 'blitz' ? 'blitz' : cfg.mode === 'combo-race' ? 'combo-race' : 'gameover',
     score, lines,
     time: Math.round(performance.now() - gameStartMs),
     ...(cfg.mode === 'combo-race' && { maxCombo: _maxCombo })
   });
-  const saveBtn = _lastReplay ? `<button class="btn replay-save-btn" style="margin-top:4px;">Save Replay</button>` : '';
+  const verifyBtn2 = _lastReplay && currentUsername() ? `<button class="btn replay-verify-btn">Verify &amp; Save</button>` : '';
+  const saveBtns = _lastReplay ? `<div style="display:flex;gap:6px;margin-top:4px;"><button class="btn replay-save-btn">Save Replay</button>${verifyBtn2}</div>` : '';
 
   if (cfg.mode === 'blitz') {
     if (cfg.ranked) recordBlitzScore(score, cfg.subMode || '2m');
     const ranked_note = cfg.ranked ? '' : '<div style="font-size:10px;color:var(--warn);margin-top:4px;">non-standard settings — not ranked</div>';
-    ov.innerHTML = `<h2 style="color:var(--accent2)">TIME'S UP</h2><div class="score-display">${score} <span style="font-size:16px;color:var(--muted)">lines sent</span></div>${ranked_note}${saveBtn}<div class="sub">press hard drop to restart</div>`;
+    ov.innerHTML = `<h2 style="color:var(--accent2)">TIME'S UP</h2><div class="score-display">${score} <span style="font-size:16px;color:var(--muted)">lines sent</span></div>${ranked_note}${saveBtns}<div class="sub">press hard drop to restart</div>`;
   } else if (cfg.mode === 'combo-race') {
     recordComboRaceScore(_maxCombo);
-    ov.innerHTML = `<h2 style="color:var(--accent2)">TIME'S UP</h2><div class="score-display">${_maxCombo} <span style="font-size:16px;color:var(--muted)">max combo</span></div>${saveBtn}<div class="sub">press hard drop to restart</div>`;
+    ov.innerHTML = `<h2 style="color:var(--accent2)">TIME'S UP</h2><div class="score-display">${_maxCombo} <span style="font-size:16px;color:var(--muted)">max combo</span></div>${saveBtns}<div class="sub">press hard drop to restart</div>`;
   } else {
-    ov.innerHTML = `<h2>GAME OVER</h2><div class="score-display">${score}</div>${saveBtn}<div class="sub">press hard drop to restart</div>`;
+    ov.innerHTML = `<h2>GAME OVER</h2><div class="score-display">${score}</div>${saveBtns}<div class="sub">press hard drop to restart</div>`;
   }
   ov.style.display='flex';
 }
@@ -902,7 +938,22 @@ document.getElementById('ingame-overlay').onclick=closeIngame;
 // Expose closeIngame for inline onclick in buildIngame HTML
 window.closeIngame = closeIngame;
 
-// Save replay button — event delegation on overlay
-document.getElementById('overlay').addEventListener('click', e => {
-  if (e.target.closest('.replay-save-btn') && _lastReplay) downloadReplay(_lastReplay);
+// Replay buttons — event delegation on overlay
+document.getElementById('overlay').addEventListener('click', async e => {
+  if (e.target.closest('.replay-save-btn') && _lastReplay) {
+    downloadReplay(_lastReplay);
+  }
+  if (e.target.closest('.replay-verify-btn') && _lastReplay) {
+    const btn = e.target.closest('.replay-verify-btn');
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    try {
+      const { id } = await verifyReplay(_lastReplay);
+      downloadReplay(_lastReplay, { id });
+      btn.textContent = '✓ Saved';
+    } catch {
+      btn.textContent = 'Failed';
+      setTimeout(() => { btn.textContent = 'Verify & Save'; btn.disabled = false; }, 2000);
+    }
+  }
 });

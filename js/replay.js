@@ -1,3 +1,32 @@
+import { fetchReplayHash } from './api.js';
+
+// ── Verification helpers ───────────────────────────────────────
+// Must produce identical output to the server's stableStringify.
+function _stableStringify(val) {
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) return JSON.stringify(val);
+  return '{' + Object.keys(val).sort().map(k => JSON.stringify(k) + ':' + _stableStringify(val[k])).join(',') + '}';
+}
+
+async function _computeHash(replay) {
+  const { version, mode, subMode, settings, pieces, events, result } = replay;
+  const content = _stableStringify({ version, mode, subMode, settings, pieces, events, result });
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Returns 'ok', 'tampered', or 'error'.
+export async function verifyReplayIntegrity(replay) {
+  if (!replay.verified?.id) return 'error';
+  try {
+    const [serverHash, localHash] = await Promise.all([
+      fetchReplayHash(replay.verified.id),
+      _computeHash(replay),
+    ]);
+    if (!serverHash) return 'error';
+    return serverHash === localHash ? 'ok' : 'tampered';
+  } catch { return 'error'; }
+}
+
 // ── Recording ─────────────────────────────────────────────────
 let _rec = null;
 
@@ -7,7 +36,8 @@ export function startRecording(mode, subMode, settings) {
     settings: {
       gravMode: settings.gravMode, gravStatic: settings.gravStatic,
       das: settings.das, arr: settings.arr, sdf: settings.sdf,
-      kicks: settings.kicks, previewCount: settings.previewCount, holdMode: settings.holdMode
+      kicks: settings.kicks, previewCount: settings.previewCount, holdMode: settings.holdMode,
+      boardWidth: settings.boardWidth, boardHeight: settings.boardHeight, overhang: settings.overhang
     },
     pieces: [], events: [], startTs: null
   };
@@ -42,13 +72,15 @@ export function finishRecording(result) {
   return replay;
 }
 
-export function downloadReplay(replay) {
-  const ts = replay.date.slice(0, 16).replace('T', '_').replace(/:/g, '-');
-  const blob = new Blob([JSON.stringify(replay)], { type: 'application/json' });
+export function downloadReplay(replay, verified = null) {
+  const toSave = verified ? { ...replay, verified } : replay;
+  const ts = (toSave.date || new Date().toISOString()).slice(0, 16).replace('T', '_').replace(/:/g, '-');
+  const suffix = verified ? '_verified' : '';
+  const blob = new Blob([JSON.stringify(toSave)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `sirteT_${replay.mode}_${ts}.json`;
+  a.download = `sirteT_${toSave.mode}_${ts}${suffix}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

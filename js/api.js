@@ -30,6 +30,31 @@ const _stored = (() => {
 })();
 _createSocket(_stored);
 
+// Looks up the stored hash for a verified replay ID. Returns the hex hash or null.
+export async function fetchReplayHash(id) {
+  try {
+    const r = await fetch(`${API_URL}/api/replay/${id}`);
+    if (!r.ok) return null;
+    return (await r.json()).hash || null;
+  } catch { return null; }
+}
+
+// Submits deterministic replay fields to the server for hashing and notarization.
+// Returns { id, hash } on success; throws on failure.
+export async function verifyReplay(replay) {
+  const { version, mode, subMode, settings, pieces, events, result } = replay;
+  const token = await getIdToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const r = await fetch(`${API_URL}/api/replay/verify`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ version, mode, subMode, settings, pieces, events, result }),
+  });
+  if (!r.ok) throw new Error((await r.json()).error || 'Verify failed');
+  return r.json();
+}
+
 // Sends a garbage attack through the server.
 export async function sendAttack({ mode, lines, targetId, roomId, senderId }) {
   try {

@@ -50,6 +50,10 @@ let qpMyUid = null, qpMyUsername = null;
 let qpSyncPending = false;
 let otherPlayers = {};
 
+// ── Client-side buffering ─────────────────────────────────────────────────────
+let _qpAtkBuf = 0, _qpAtkFlushTimer = null;
+let _qpLastSyncTs = 0;
+
 // ── Queue ─────────────────────────────────────────────────────────────────────
 function qpEnsureQueue() {
   while (qpBag.length < 14) fillBag(qpBag);
@@ -272,10 +276,17 @@ function getQpTarget() {
   return i === all.length - 1 ? (i > 0 ? all[i-1].uid : null) : all[i+1].uid;
 }
 
-function sendQpAttack(lines) {
+function flushQpAttack() {
+  _qpAtkFlushTimer = null;
+  if (!qpAlive || _qpAtkBuf <= 0) { _qpAtkBuf = 0; return; }
   const target = getQpTarget();
-  if (!target) return;
-  sendAttack({ mode: 'qp', lines, targetId: target });
+  if (target) sendAttack({ mode: 'qp', lines: _qpAtkBuf, targetId: target });
+  _qpAtkBuf = 0;
+}
+
+function sendQpAttack(lines) {
+  _qpAtkBuf += lines;
+  if (!_qpAtkFlushTimer) _qpAtkFlushTimer = setTimeout(flushQpAttack, 150);
 }
 
 // ── Socket sync (throttled 100ms) ─────────────────────────────────────────────
@@ -299,24 +310,41 @@ function schedQpSync() {
   }, 100);
 }
 
-// ── Players panel ─────────────────────────────────────────────────────────────
+// ── Leaderboard ───────────────────────────────────────────────────────────────
 function updateQpPanel() {
   const el = document.getElementById('qp-players-list');
-  if (!el) return;
-  const target = getQpTarget();
-  const now    = Date.now();
-  const entries = Object.entries(otherPlayers)
-    .filter(([, p]) => now - (p.lastSeen || 0) < 30000)
-    .sort((a, b) => (b[1].score || 0) - (a[1].score || 0));
+  if (!el || !qpMyUid) return;
+  const now = Date.now();
 
-  el.innerHTML = entries.map(([uid, p]) => {
-    const alive    = p.alive !== false;
-    const targeted = uid === target;
-    return `<div class="qp-player-item${alive ? '' : ' qp-dead'}${targeted ? ' qp-targeted' : ''}">
-      <span class="qp-player-name">${p.username || uid.slice(0,8)}</span>
-      <span class="qp-player-score">${(p.score||0).toFixed(1)}</span>
-    </div>`;
-  }).join('') || '<div style="font-size:11px;color:var(--muted);padding:8px 6px;">No other players</div>';
+  const all = [];
+  for (const [uid, p] of Object.entries(otherPlayers)) {
+    if (now - (p.lastSeen || 0) > 30000) continue;
+    all.push({ uid, username: p.username || uid.slice(0, 8), score: p.score || 0, alive: p.alive !== false });
+  }
+  all.push({ uid: qpMyUid, username: qpMyUsername, score: parseFloat(qpScore.toFixed(1)), alive: qpAlive });
+  all.sort((a, b) => b.score - a.score);
+
+  const myRank = all.findIndex(p => p.uid === qpMyUid);
+
+  function renderRow(p, rank) {
+    const isSelf = p.uid === qpMyUid;
+    return `<div class="qp-lb-row${isSelf ? ' qp-lb-self' : ''}${!p.alive ? ' qp-dead' : ''}">` +
+      `<span class="qp-lb-rank">#${rank}</span>` +
+      `<span class="qp-lb-name">${p.username}</span>` +
+      `<span class="qp-player-score">${p.score.toFixed(1)}</span>` +
+      `</div>`;
+  }
+
+  let html;
+  if (myRank < 20) {
+    html = all.slice(0, 20).map((p, i) => renderRow(p, i + 1)).join('');
+  } else {
+    const ctxStart = Math.max(10, Math.min(all.length - 10, myRank - 4));
+    html = all.slice(0, 10).map((p, i) => renderRow(p, i + 1)).join('') +
+      `<div class="qp-lb-divider"></div>` +
+      all.slice(ctxStart, ctxStart + 10).map((p, i) => renderRow(p, ctxStart + i + 1)).join('');
+  }
+  el.innerHTML = html;
 }
 
 // ── Draw helpers ──────────────────────────────────────────────────────────────
@@ -418,7 +446,7 @@ function qpLoop(ts) {
   const tName = (tUid && otherPlayers[tUid]?.username) || (tUid ? '...' : '—');
   document.getElementById('qp-target-val').textContent = tName;
 
-  schedQpSync();
+  if (ts - _qpLastSyncTs > 2000) { _qpLastSyncTs = ts; schedQpSync(); }
   qpRafId = requestAnimationFrame(qpLoop);
 }
 
@@ -440,12 +468,14 @@ export function startQpGame() {
   qpLevel = 1; qpDropAcc = 0;
   qpCancelLock();
   otherPlayers = {};
+  _qpAtkBuf = 0; if (_qpAtkFlushTimer) { clearTimeout(_qpAtkFlushTimer); _qpAtkFlushTimer = null; }
+  _qpLastSyncTs = 0;
 
   clearAttackSplash('qp-board-wrap');
   updateCounters('qp-board-wrap', 0, 0);
   updateGarbageBar('qp-garbage-bar', []);
   document.getElementById('qp-dead-overlay').style.display = 'none';
-  document.getElementById('qp-players-list').innerHTML = '';
+  updateQpPanel();
 
   // Remove stale listeners before re-joining
   socket.off('qp:players');
@@ -501,6 +531,7 @@ export function stopQpGame() {
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   qpCancelLock(); qpStopDAS(); qpStopSD();
+  _qpAtkBuf = 0; if (_qpAtkFlushTimer) { clearTimeout(_qpAtkFlushTimer); _qpAtkFlushTimer = null; }
   const socket = getSocket();
   if (socket) {
     socket.off('qp:players');
