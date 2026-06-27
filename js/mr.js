@@ -19,7 +19,7 @@ import {
   showToast, showAttackSplash, clearAttackSplash,
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
-import { playSfx, startMusic, stopMusic } from './sound.js';
+import { playSfx, playLineClearTone, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { currentUser, currentUsername } from './account.js';
 import { getSocket, sendAttack } from './api.js';
@@ -239,7 +239,7 @@ function initMrGame() {
   mrRunning = false;
   cancelAnimationFrame(mrRafId);
   showCountdown('mr-board-wrap', () => {
-    startMusic('music/aperture.wav');
+    // startMusic('music/aperture.wav');
     mrSpawnNext();
     mrRunning  = true;
     mrLastTime = performance.now();
@@ -417,11 +417,12 @@ function mrClearLines(spin, key) {
 
   if (b2bElig || perfect || colored) mrB2b++;
   else mrB2b = 0;
+  playLineClearTone(mrCombo, total, spin);
   mrCombo++;
   updateCounters('mr-board-wrap', mrCombo, mrB2b);
 
   if (attack > 0) {
-    showAttackSplash('mr-board-wrap', attack);
+    showAttackSplash('mr-board-wrap', attack, null, mrCombo >= 2);
     sendMrAttack(attack);
   }
 

@@ -78,7 +78,7 @@ function _requireAuth(label, fn) {
 window.beginBotSetup = () => _requireAuth('vs Bot',      () => showScreen('screen-bot-setup'));
 window.beginLobby    = () => _requireAuth('1v1 Rooms',   () => showScreen('screen-lobby'));
 window.beginMrLobby  = () => _requireAuth('Custom Room', () => showScreen('screen-mr-lobby'));
-window.beginQpGame   = () => _requireAuth('Quick Play',  () => { showScreen('screen-qp'); startQpGame(); });
+window.beginQpGame   = () => { showScreen('screen-qp'); startQpGame(); };
 window.leaveQpGame   = () => { stopQpGame(); showScreen('screen-menu'); };
 window.createMrRoom          = createMrRoom;
 window.joinMrRoom            = joinMrRoom;

@@ -3,7 +3,7 @@ import { cfg, pieceColors } from './state.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 import { mkGrid, mkPiece, collide, fillBag } from './pieces.js';
 import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showSplash, updateCounters, drawMini, showCountdown, showScreen } from './ui.js';
-import { playSfx, playSfxPitched, startMusic, stopMusic } from './sound.js';
+import { playSfx, playLineClearTone, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { loadStats, saveStats, recordSprintTime, recordBlitzScore, recordComboRaceScore } from './stats.js';
 import { startRecording, markRecordingStart, recordPiece, recordAction, finishRecording,
@@ -439,7 +439,7 @@ function clearLines(spin, pieceKey) {
     updateCounters('board-wrap', 0, b2bCount);
     return;
   }
-  playSfxPitched('clear.wav', Math.min(comboCount + 1, 16));
+  playLineClearTone(comboCount, cleared, spin);
 
   const boardEmpty     = grid.every(row => row.every(c => !c));
   const isPerfectClear = boardEmpty && !hadGarbage;
@@ -734,7 +734,7 @@ export function startGame() {
   board.draw({ grid, piece:null, ghostY:null, lockFlashing:false, lockBright:true,
     ghostOpacity:0, gridOn:true, gridColor:cfg.gridColor||'rgba(255,255,255,0.04)', gridWidth:cfg.gridWidth||0.5 });
   showCountdown('board-wrap', () => {
-    startMusic('music/aperture.wav');
+    // startMusic('music/aperture.wav');
     if (_isReplayMode && _pendingEvents !== null) {
       scheduleReplayEvents(_pendingEvents, dispatchReplayAction);
       _pendingEvents = null;

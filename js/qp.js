@@ -14,17 +14,18 @@ import {
   showToast, showAttackSplash, clearAttackSplash,
   showSplash, updateCounters, updateGarbageBar, drawMini, showCountdown
 } from './ui.js';
-import { playSfx, startMusic, stopMusic } from './sound.js';
+import { playSfx, playLineClearTone, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { currentUser, currentUsername } from './account.js';
-import { getSocket, sendAttack } from './api.js';
+import { getSocket } from './api.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 const QP_PREVIEW = 5;
 
 // ── Canvas setup ──────────────────────────────────────────────────────────────
-const qpBoardEl = document.getElementById('qp-board');
-const qpBrd     = createBoard(qpBoardEl, SZ);
+const qpBoardEl   = document.getElementById('qp-board');
+const qpBrd       = createBoard(qpBoardEl, SZ);
+const _qpBoardWrap = document.getElementById('qp-board-wrap');
 const qpHoldEl  = document.getElementById('qp-hold-canvas');
 const qpHoldCtx = qpHoldEl.getContext('2d');
 
@@ -33,7 +34,7 @@ export let qpRunning = false;
 export let qpPiece   = null;
 
 let qpGrid, qpBag, qpQueue, qpHeld, qpHoldUsed;
-let qpScore, qpScoreAccum, qpAlive;
+let qpScore, qpAlive;
 let qpCombo, qpB2b;
 let qpGarbage, qpLastKiller, qpKoSet;
 let qpLevel, qpDropAcc;
@@ -53,6 +54,57 @@ let otherPlayers = {};
 // ── Client-side buffering ─────────────────────────────────────────────────────
 let _qpAtkBuf = 0, _qpAtkFlushTimer = null;
 let _qpLastSyncTs = 0;
+let _qpClimbSpeed = 0;
+let _qpBx = 0, _qpBy = 0;
+let _qpDropLines = [];
+let _qpMotionTrail = [], _qpPrevPiece = null;
+
+// ── Board bounce spring ───────────────────────────────────────────────────────
+function _qpBounceImpulse(dx, dy) {
+  if (!cfg.boardBounce) return;
+  const s = cfg.boardBounce * 0.6;
+  _qpBx += dx * s; _qpBy += dy * s;
+}
+function _qpSpringStep() {
+  const decay = 0.70 + (cfg.boardElasticity / 10) * 0.22;
+  _qpBx *= decay; _qpBy *= decay;
+  if (Math.abs(_qpBx) < 0.01) _qpBx = 0;
+  if (Math.abs(_qpBy) < 0.01) _qpBy = 0;
+  _qpBoardWrap.style.transform = (_qpBx === 0 && _qpBy === 0) ? '' : `translate(${_qpBx.toFixed(2)}px,${_qpBy.toFixed(2)}px)`;
+}
+
+// ── Climb speed tiers ─────────────────────────────────────────────────────────
+const _QP_TIERS = [
+  { min: 0.999,   max: 0.3,  color: '#ef4444' }, // Red
+  { min: 0.3, max: 0.6,  color: '#eab308' }, // Yellow
+  { min: 0.6, max: 1.0,  color: '#22c55e' }, // Green
+  { min: 1.0, max: 1.5,  color: '#3b82f6' }, // Blue
+  { min: 1.5, max: 2.3,  color: '#d946ef' }, // Magenta
+  { min: 2.3, max: 1000.0,  color: '#ffffff' }, // White
+];
+
+function _qpUpdateClimbBar(speed) {
+  const speedEl = document.getElementById('qp-climb-speed-val');
+  if (speedEl) speedEl.textContent = speed.toFixed(2);
+
+  const mainEl = document.getElementById('qp-climb-bar-main');
+  const nextEl = document.getElementById('qp-climb-bar-next');
+  if (!mainEl || !nextEl) return;
+
+  let ti = 0;
+  for (let i = _QP_TIERS.length - 1; i >= 0; i--) {
+    if (speed >= _QP_TIERS[i].min) { ti = i; break; }
+  }
+  const tier = _QP_TIERS[ti];
+  mainEl.style.background = speed > 0 ? tier.color : 'transparent';
+  const pct = Math.min(100, ((speed - tier.min) / (tier.max - tier.min)) * 100);
+  if (ti < _QP_TIERS.length - 1) {
+    nextEl.style.width = pct + '%';
+    nextEl.style.background = _QP_TIERS[ti + 1].color;
+  } else {
+    nextEl.style.width = '0';
+  }
+}
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 function qpEnsureQueue() {
@@ -139,6 +191,34 @@ export function qpDoHold() {
 export function qpHardDrop() {
   if (!qpRunning || !qpPiece || !qpAlive) return;
   playSfx('harddrop.wav'); qpCancelLock();
+  _qpBounceImpulse(0, 1.8);
+  if (cfg.dropTrailIntensity > 0) {
+    const destY = qpGhostY();
+    const dist  = destY - qpPiece.y;
+    if (dist > 0) {
+      const now    = performance.now();
+      const color  = pieceColors[qpPiece.key];
+      const leftX  = qpPiece.x * SZ;
+      const rightX = (qpPiece.x + qpPiece.shape[0].length) * SZ;
+      const y1px   = qpPiece.y * SZ;
+      const y2px   = destY * SZ;
+      _qpDropLines.push({ x: leftX,  y1: y1px, y2: y2px, color, side: -1, t: now });
+      _qpDropLines.push({ x: rightX, y1: y1px, y2: y2px, color, side:  1, t: now });
+    }
+  }
+  if (cfg.motionBlurTrail > 0) {
+    const now  = performance.now();
+    const dest = qpGhostY();
+    const dist = dest - qpPiece.y;
+    if (dist > 0) {
+      const maxEntries = cfg.motionBlurTrail + 2;
+      const step = Math.max(1, Math.floor(dist / maxEntries));
+      for (let dy = 0; dy < dist; dy += step) {
+        _qpMotionTrail.unshift({ x: qpPiece.x, y: qpPiece.y + dy, shape: qpPiece.shape.map(r => [...r]), key: qpPiece.key, t: now - (dist - dy) * 4, hardDrop: true });
+      }
+      if (_qpMotionTrail.length > maxEntries) _qpMotionTrail.length = maxEntries;
+    }
+  }
   qpPiece.y = qpGhostY();
   qpDoLock();
 }
@@ -168,7 +248,7 @@ function qpClearLines(spin, key) {
     }
   }
   const total = reg + garb;
-  qpScore += reg * 1 + garb * 0.5;
+  if (total > 0) _qpClimbSpeed += total * 0.1;
 
   if (total === 0) {
     qpCombo = 0;
@@ -191,12 +271,20 @@ function qpClearLines(spin, key) {
 
   if (b2bElig || perfect || colored) qpB2b++;
   else qpB2b = 0;
+  playLineClearTone(qpCombo, total, spin);
   qpCombo++;
   updateCounters('qp-board-wrap', qpCombo, qpB2b);
 
   if (attack > 0) {
-    showAttackSplash('qp-board-wrap', attack);
-    sendQpAttack(attack);
+    _qpClimbSpeed += attack * 0.1;
+    const inCombo = qpCombo >= 2;
+    showAttackSplash('qp-board-wrap', attack, null, inCombo);
+    if (inCombo) {
+      sendQpAttack(attack);
+    } else {
+      _qpAtkBuf += attack;
+      flushQpAttack();
+    }
   }
 
   const lbl = perfect ? 'PERFECT CLEAR' : colored ? 'COLORED CLEAR'
@@ -266,21 +354,43 @@ function qpTopOut() {
 
 // ── Target calculation ────────────────────────────────────────────────────────
 function getQpTarget() {
-  const now   = Date.now();
+  const now = Date.now();
   const alive = Object.entries(otherPlayers)
     .filter(([, p]) => p.alive !== false && now - (p.lastSeen || 0) < 30000)
-    .map(([uid, p]) => ({ uid, score: p.score || 0 }));
+    .map(([uid, p]) => ({ uid, score: p.score || 0, speed: p.speed || 0.1 }));
   if (!alive.length) return null;
-  const all = [...alive, { uid: qpMyUid, score: qpScore }].sort((a, b) => a.score - b.score);
-  const i   = all.findIndex(p => p.uid === qpMyUid);
-  return i === all.length - 1 ? (i > 0 ? all[i-1].uid : null) : all[i+1].uid;
+
+  // Sort by score to find rank neighbors
+  const all = [...alive, { uid: qpMyUid, score: qpScore, speed: _qpClimbSpeed }]
+    .sort((a, b) => a.score - b.score);
+  const myIdx = all.findIndex(p => p.uid === qpMyUid);
+
+  // 5 nearest below + 5 nearest above in score rank (up to 10 candidates)
+  const candidates = [
+    ...all.slice(Math.max(0, myIdx - 5), myIdx),
+    ...all.slice(myIdx + 1, myIdx + 6),
+  ];
+  if (!candidates.length) return null;
+
+  // Weighted random: higher climb speed = higher probability of being targeted
+  const weights = candidates.map(p => Math.max(p.speed, 0.1));
+  const total = weights.reduce((s, w) => s + w, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i].uid;
+  }
+  return candidates[candidates.length - 1].uid;
 }
 
 function flushQpAttack() {
   _qpAtkFlushTimer = null;
   if (!qpAlive || _qpAtkBuf <= 0) { _qpAtkBuf = 0; return; }
   const target = getQpTarget();
-  if (target) sendAttack({ mode: 'qp', lines: _qpAtkBuf, targetId: target });
+  if (target) {
+    const socket = getSocket();
+    if (socket) socket.emit('qp:sendAttack', { targetId: target, lines: _qpAtkBuf });
+  }
   _qpAtkBuf = 0;
 }
 
@@ -301,6 +411,7 @@ function schedQpSync() {
     socket.emit('qp:syncBoard', {
       username: qpMyUsername,
       score:    parseFloat(qpScore.toFixed(1)),
+      speed:    parseFloat(_qpClimbSpeed.toFixed(2)),
       alive:    true,
       next:     qpQueue.slice(0, 5),
       hold:     qpHeld || null,
@@ -378,7 +489,7 @@ function qpDrawPreviews() {
 // ── DAS / soft drop ───────────────────────────────────────────────────────────
 function qpMoveH(dx) {
   if (!qpRunning || !qpPiece || !qpAlive) return;
-  if (!collide(qpPiece.shape, qpPiece.x + dx, qpPiece.y, qpGrid)) { qpPiece.x += dx; playSfx('move.wav'); qpOnMove(); }
+  if (!collide(qpPiece.shape, qpPiece.x + dx, qpPiece.y, qpGrid)) { qpPiece.x += dx; playSfx('move.wav'); _qpBounceImpulse(dx, 0); qpOnMove(); }
 }
 
 export function qpStartDAS(dx) {
@@ -419,8 +530,11 @@ function qpLoop(ts) {
   qpLastTime = ts;
 
   if (qpAlive) {
-    qpScoreAccum += dt;
-    while (qpScoreAccum >= 1000) { qpScore += 0.1; qpScoreAccum -= 1000; }
+    _qpClimbSpeed *= Math.pow(0.90, dt / 1000);
+    if (_qpClimbSpeed < 0.1) _qpClimbSpeed = 0.1;
+    qpScore += _qpClimbSpeed * (dt / 1000);
+
+    _qpUpdateClimbBar(_qpClimbSpeed);
 
     if (!qpGrounded()) {
       qpDropAcc += dt;
@@ -430,14 +544,52 @@ function qpLoop(ts) {
   }
 
   const { circleGrid, circlePiece } = getCircleOffsets(ts);
+
+  const curPiece = qpAlive ? qpPiece : null;
+  let motionTrail = null;
+  if (cfg.motionBlurTrail > 0 && curPiece) {
+    const now = performance.now();
+    const trailDuration = cfg.motionBlurTrail * 40;
+    const maxEntries    = cfg.motionBlurTrail + 2;
+    if (_qpPrevPiece && (_qpPrevPiece.x !== curPiece.x || _qpPrevPiece.y !== curPiece.y)) {
+      _qpMotionTrail.unshift({ x: _qpPrevPiece.x, y: _qpPrevPiece.y, shape: _qpPrevPiece.shape, key: curPiece.key, t: now });
+      if (_qpMotionTrail.length > maxEntries) _qpMotionTrail.pop();
+    }
+    _qpMotionTrail = _qpMotionTrail.filter(e => now - e.t < trailDuration);
+    _qpPrevPiece = { x: curPiece.x, y: curPiece.y, shape: curPiece.shape.map(r => [...r]) };
+    if (_qpMotionTrail.length > 0) {
+      const intensityMult = cfg.motionBlurIntensity / 5;
+      motionTrail = _qpMotionTrail.map(e => {
+        const t = Math.min(1, (now - e.t) / trailDuration);
+        return { ...e, alpha: Math.pow(1 - t, 1.4) * 0.55 * intensityMult, blur: t * SZ * 0.9 };
+      });
+    }
+  } else {
+    _qpPrevPiece = null;
+  }
+
+  let dropLines = null;
+  if (_qpDropLines.length > 0) {
+    const now = performance.now();
+    const dur = 420;
+    _qpDropLines = _qpDropLines.filter(dl => now - dl.t < dur);
+    if (_qpDropLines.length > 0) {
+      const intensityMult = cfg.dropTrailIntensity / 5;
+      dropLines = _qpDropLines.map(dl => ({
+        ...dl, alpha: Math.pow(1 - (now - dl.t) / dur, 1.6) * 0.85 * intensityMult,
+      }));
+    }
+  }
+
   qpBrd.draw({
-    grid: qpGrid, piece: qpAlive ? qpPiece : null,
+    grid: qpGrid, piece: curPiece,
     ghostY:      (qpAlive && qpPiece && cfg.ghostOpacity > 0) ? qpGhostY() : null,
     lockFlashing: qpLockFlashing, lockBright: qpLockBright,
     ghostOpacity: cfg.ghostOpacity,
     gridOn: cfg.gridOn, gridColor: cfg.gridColor, gridWidth: cfg.gridWidth,
-    circleGrid, circlePiece,
+    circleGrid, circlePiece, motionTrail, dropLines,
   });
+  _qpSpringStep();
   qpDrawPreviews();
   qpDrawHold();
 
@@ -454,15 +606,20 @@ function qpLoop(ts) {
 export function startQpGame() {
   const user   = currentUser();
   const socket = getSocket();
-  if (!user) { showToast('Sign in required'); return; }
   if (!socket) { showToast('Not connected'); return; }
 
-  qpMyUid      = user.uid;
-  qpMyUsername = currentUsername() || user.email;
+  if (user) {
+    qpMyUid      = user.uid;
+    qpMyUsername = currentUsername() || user.email;
+  } else {
+    const rnd    = String(Math.floor(10000000 + Math.random() * 90000000));
+    qpMyUid      = 'anon_' + rnd;
+    qpMyUsername = 'Player ' + rnd;
+  }
 
   qpGrid = mkGrid(); qpBag = []; qpQueue = [];
   qpHeld = null; qpHoldUsed = false; qpPiece = null;
-  qpScore = 0; qpScoreAccum = 0; qpAlive = true;
+  qpScore = 0; qpAlive = true; _qpClimbSpeed = 0.1;
   qpCombo = 0; qpB2b = 0;
   qpGarbage = []; qpLastKiller = null; qpKoSet = new Set();
   qpLevel = 1; qpDropAcc = 0;
@@ -470,6 +627,8 @@ export function startQpGame() {
   otherPlayers = {};
   _qpAtkBuf = 0; if (_qpAtkFlushTimer) { clearTimeout(_qpAtkFlushTimer); _qpAtkFlushTimer = null; }
   _qpLastSyncTs = 0;
+  _qpBx = 0; _qpBy = 0; _qpBoardWrap.style.transform = '';
+  _qpDropLines = []; _qpMotionTrail = []; _qpPrevPiece = null;
 
   clearAttackSplash('qp-board-wrap');
   updateCounters('qp-board-wrap', 0, 0);
@@ -517,7 +676,7 @@ export function startQpGame() {
   qpRunning = false;
   cancelAnimationFrame(qpRafId);
   showCountdown('qp-board-wrap', () => {
-    startMusic('music/aperture.wav');
+    // startMusic('music/aperture.wav');
     qpSpawnNext();
     qpRunning = true;
     qpLastTime = performance.now();

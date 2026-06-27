@@ -298,6 +298,11 @@ canvas.vs-board{border:1px solid var(--border2);image-rendering:pixelated;displa
 .qp-players-title{font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);
   font-family:'Space Mono',monospace;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:5px;}
 .qp-player-score{color:var(--accent2);font-family:'Space Mono',monospace;font-size:10px;flex-shrink:0;}
+#qp-climb-area{margin-top:5px;width:282px;}
+#qp-climb-bar-wrap{position:relative;height:3px;border-radius:1px;overflow:hidden;}
+#qp-climb-bar-main{position:absolute;inset:0;}
+#qp-climb-bar-next{position:absolute;top:0;left:50%;transform:translateX(-50%);height:100%;width:0;opacity:0.7;}
+#qp-climb-speed-val{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-align:center;margin-top:3px;}
 .qp-lb-row{display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:3px;margin-bottom:1px;font-size:11px;}
 .qp-lb-row.qp-dead{opacity:0.3;}
 .qp-lb-self{background:rgba(255,255,255,0.07);}
@@ -1009,16 +1014,25 @@ body.stupid-effect #board,body.stupid-effect #vs-my-board,body.stupid-effect #bo
           <div class="hold-label">Hold</div>
           <canvas id="qp-hold-canvas" width="76" height="60"></canvas>
         </div>
-        <div class="vs-board-wrap" id="qp-board-wrap">
-          <canvas id="qp-board" class="vs-board" width="280" height="560"></canvas>
-          <div id="qp-dead-overlay" style="display:none;position:absolute;inset:0;background:rgba(10,10,12,0.78);flex-direction:column;align-items:center;justify-content:center;gap:10px;">
-            <div style="font-family:'Space Mono',monospace;font-size:14px;letter-spacing:0.15em;color:var(--danger);">YOU DIED</div>
-            <div style="font-size:11px;color:var(--muted);">Final Score</div>
-            <div id="qp-dead-score" style="font-family:'Space Mono',monospace;font-size:28px;color:var(--accent2);">0.0</div>
-            <button class="btn" onclick="leaveQpGame()" style="margin-top:6px;">Leave</button>
+        <div style="display:flex;flex-direction:column;">
+          <div class="vs-board-wrap" id="qp-board-wrap">
+            <canvas id="qp-board" class="vs-board" width="280" height="560"></canvas>
+            <div id="qp-dead-overlay" style="display:none;position:absolute;inset:0;background:rgba(10,10,12,0.78);flex-direction:column;align-items:center;justify-content:center;gap:10px;">
+              <div style="font-family:'Space Mono',monospace;font-size:14px;letter-spacing:0.15em;color:var(--danger);">YOU DIED</div>
+              <div style="font-size:11px;color:var(--muted);">Final Score</div>
+              <div id="qp-dead-score" style="font-family:'Space Mono',monospace;font-size:28px;color:var(--accent2);">0.0</div>
+              <button class="btn" onclick="leaveQpGame()" style="margin-top:6px;">Leave</button>
+            </div>
+            <div class="b2b-display side-left"></div>
+            <div class="combo-display side-left"></div>
           </div>
-          <div class="b2b-display side-left"></div>
-          <div class="combo-display side-left"></div>
+          <div id="qp-climb-area">
+            <div id="qp-climb-bar-wrap">
+              <div id="qp-climb-bar-main"></div>
+              <div id="qp-climb-bar-next"></div>
+            </div>
+            <div id="qp-climb-speed-val">0.0</div>
+          </div>
         </div>
         <div>
           <div class="garbage-bar" id="qp-garbage-bar" style="height:560px;"></div>
@@ -1187,10 +1201,10 @@ body.stupid-effect #board,body.stupid-effect #vs-my-board,body.stupid-effect #bo
       <div class="auth-error" id="auth-error"></div>
       <div class="btn-row" style="margin-top:4px;">
         <button class="btn accent" onclick="doLogIn()">Sign In</button>
-        <button class="btn" onclick="doSignUp()">Create Account</button>
+        <button class="btn" disabled style="opacity:0.4;cursor:not-allowed;" title="Under construction">Create Account</button>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:12px;">
-        A random username is assigned on account creation. You can change it after signing in.
+      <div style="font-size:10px;color:var(--warn);margin-top:12px;">
+        Account creation is temporarily unavailable.
       </div>
     </div>
 

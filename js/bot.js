@@ -6,14 +6,15 @@ import { computeBestMove as computeBestMove2 } from './ai2.js';
 
 
 import { fmtTime, showToast, showSplash, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showRainbowSplash, updateCounters, drawMini, darken, lighten, showCountdown } from './ui.js';
-import { playSfx, startMusic, stopMusic } from './sound.js';
+import { playSfx, playLineClearTone, stopMusic } from './sound.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
 
 let computeBestMove = computeBestMove1;
 
 // Canvas refs
-const myBoardEl  = document.getElementById('bot-my-board');
-const myCtx      = myBoardEl.getContext('2d');
+const myBoardEl   = document.getElementById('bot-my-board');
+const myCtx       = myBoardEl.getContext('2d');
+const _pBoardWrap = document.getElementById('bot-my-board-wrap');
 const oppBoardEl = document.getElementById('bot-opp-board');
 const oppCtx     = oppBoardEl.getContext('2d');
 const holdEl     = document.getElementById('bot-hold-canvas');
@@ -24,6 +25,23 @@ const oppHoldCtx = oppHoldEl.getContext('2d');
 export let botRunning = false;
 export let botRunLoop = false;
 export let botPiece   = null; // player's active piece — exported so main.js can gate keyboard input
+
+// ── Player visual effects ─────────────────────────────────────
+let _pBx = 0, _pBy = 0;
+let _pDropLines = [];
+let _pMotionTrail = [], _pPrevPiece = null;
+function _pBounceImpulse(dx, dy) {
+  if (!cfg.boardBounce) return;
+  const s = cfg.boardBounce * 0.6;
+  _pBx += dx * s; _pBy += dy * s;
+}
+function _pSpringStep() {
+  const decay = 0.70 + (cfg.boardElasticity / 10) * 0.22;
+  _pBx *= decay; _pBy *= decay;
+  if (Math.abs(_pBx) < 0.01) _pBx = 0;
+  if (Math.abs(_pBy) < 0.01) _pBy = 0;
+  _pBoardWrap.style.transform = (_pBx === 0 && _pBy === 0) ? '' : `translate(${_pBx.toFixed(2)}px,${_pBy.toFixed(2)}px)`;
+}
 
 // ── Player state ──────────────────────────────────────────────
 let pGrid, pPiece, pHeldKey, pHoldUsed;
@@ -260,7 +278,34 @@ export function botTryRotate180() {
 
 export function botHardDrop() {
   if (!botRunLoop || !pPiece) return;
-  playSfx('harddrop.wav'); pCancelLock(); pPiece.y = pGhostY(); pDoLock();
+  playSfx('harddrop.wav'); pCancelLock();
+  _pBounceImpulse(0, 1.8);
+  if (cfg.dropTrailIntensity > 0) {
+    const destY = pGhostY();
+    const dist  = destY - pPiece.y;
+    if (dist > 0) {
+      const now    = performance.now();
+      const color  = pieceColors[pPiece.key];
+      const leftX  = pPiece.x * VS_SZ;
+      const rightX = (pPiece.x + pPiece.shape[0].length) * VS_SZ;
+      _pDropLines.push({ x: leftX,  y1: pPiece.y * VS_SZ, y2: destY * VS_SZ, color, side: -1, t: now });
+      _pDropLines.push({ x: rightX, y1: pPiece.y * VS_SZ, y2: destY * VS_SZ, color, side:  1, t: now });
+    }
+  }
+  if (cfg.motionBlurTrail > 0) {
+    const now  = performance.now();
+    const dest = pGhostY();
+    const dist = dest - pPiece.y;
+    if (dist > 0) {
+      const maxEntries = cfg.motionBlurTrail + 2;
+      const step = Math.max(1, Math.floor(dist / maxEntries));
+      for (let dy = 0; dy < dist; dy += step) {
+        _pMotionTrail.unshift({ x: pPiece.x, y: pPiece.y + dy, shape: pPiece.shape.map(r => [...r]), key: pPiece.key, t: now - (dist - dy) * 4, hardDrop: true });
+      }
+      if (_pMotionTrail.length > maxEntries) _pMotionTrail.length = maxEntries;
+    }
+  }
+  pPiece.y = pGhostY(); pDoLock();
 }
 
 export function botDoHold() {
@@ -343,10 +388,11 @@ function pClearLines(spin, pieceKey) {
   else rawBase = baseAttack(cleared, spin) + (isB2BEligible ? b2bBonus(pB2bCount) : 0);
   const garbage = Math.floor(rawBase * (1 + 0.2 * pComboCount));
   if (isB2BEligible || isPerfect || isColoredClear) pB2bCount++; else pB2bCount = 0;
+  playLineClearTone(pComboCount, cleared, spin);
   pComboCount++;
   if (garbage > 0) {
     pLinesSent += garbage;
-    showAttackSplash('bot-my-board-wrap', garbage, (total) => { bGarbageQueue.push(total); updateGarbageBar('bot-opp-garbage-bar', bGarbageQueue); });
+    showAttackSplash('bot-my-board-wrap', garbage, (total) => { bGarbageQueue.push(total); updateGarbageBar('bot-opp-garbage-bar', bGarbageQueue); }, pComboCount >= 2);
   }
   updateCounters('bot-my-board-wrap', pComboCount, pB2bCount);
   if (isPerfect || isColoredClear) {
@@ -391,6 +437,7 @@ function gameLoop(ts) {
     if (pDropAcc > getGravInterval()) { pDropAcc = 0; pPiece.y++; pOnMove(); }
   }
   drawPlayerBoard(); drawBotBoard(); drawPlayerPreviews(); drawBotPreviews();
+  _pSpringStep();
   rafId = requestAnimationFrame(gameLoop);
 }
 
@@ -502,7 +549,8 @@ function botDrawWrapped(ctx, el, ox, oy, fn) {
 }
 
 function drawPlayerBoard() {
-  const { circleGrid, circlePiece } = getCircleOffsets(performance.now());
+  const now = performance.now();
+  const { circleGrid, circlePiece } = getCircleOffsets(now);
   drawGridLines(myCtx, myBoardEl);
   const drawGrid = () => {
     for (let r = 0; r < ROWS; r++)
@@ -516,6 +564,37 @@ function drawPlayerBoard() {
   };
   if (circleGrid) botDrawWrapped(myCtx, myBoardEl, circleGrid.x, circleGrid.y, drawGrid);
   else drawGrid();
+
+  // Compute motion trail
+  let motionTrail = null;
+  if (cfg.motionBlurTrail > 0 && pPiece) {
+    const trailDur = cfg.motionBlurTrail * 40, maxE = cfg.motionBlurTrail + 2;
+    if (_pPrevPiece && (_pPrevPiece.x !== pPiece.x || _pPrevPiece.y !== pPiece.y)) {
+      _pMotionTrail.unshift({ x: _pPrevPiece.x, y: _pPrevPiece.y, shape: _pPrevPiece.shape, key: pPiece.key, t: now });
+      if (_pMotionTrail.length > maxE) _pMotionTrail.pop();
+    }
+    _pMotionTrail = _pMotionTrail.filter(e => now - e.t < trailDur);
+    _pPrevPiece = { x: pPiece.x, y: pPiece.y, shape: pPiece.shape.map(r => [...r]) };
+    if (_pMotionTrail.length > 0) {
+      const im = cfg.motionBlurIntensity / 5;
+      motionTrail = _pMotionTrail.map(e => {
+        const t = Math.min(1, (now - e.t) / trailDur);
+        return { ...e, alpha: Math.pow(1 - t, 1.4) * 0.55 * im, blur: t * VS_SZ * 0.9 };
+      });
+    }
+  } else { _pPrevPiece = null; }
+
+  // Compute drop lines
+  let dropLines = null;
+  if (_pDropLines.length > 0) {
+    const dur = 420;
+    _pDropLines = _pDropLines.filter(dl => now - dl.t < dur);
+    if (_pDropLines.length > 0) {
+      const im = cfg.dropTrailIntensity / 5;
+      dropLines = _pDropLines.map(dl => ({ ...dl, alpha: Math.pow(1 - (now - dl.t) / dur, 1.6) * 0.85 * im }));
+    }
+  }
+
   if (pPiece) {
     const gy = pGhostY();
     const outColor = cfg.pieceOutline ? lighten(pieceColors[pPiece.key]) : null;
@@ -533,6 +612,18 @@ function drawPlayerBoard() {
           for (let c = 0; c < pPiece.shape[r].length; c++)
             if (pPiece.shape[r][c]) drawCell(myCtx, pieceColors[pPiece.key], pPiece.x+c, gy+r, ghostAlpha);
       }
+      if (motionTrail) {
+        for (const e of [...motionTrail].reverse()) {
+          myCtx.save();
+          myCtx.filter = `blur(${e.blur.toFixed(1)}px)`;
+          myCtx.globalAlpha = e.alpha;
+          myCtx.fillStyle = pieceColors[e.key];
+          for (let r = 0; r < e.shape.length; r++)
+            for (let c = 0; c < e.shape[r].length; c++)
+              if (e.shape[r][c]) myCtx.fillRect((e.x+c)*VS_SZ, (e.y+r)*VS_SZ, VS_SZ, VS_SZ);
+          myCtx.restore();
+        }
+      }
       const col = pLockFlashing && !pLockBright ? darken(pieceColors[pPiece.key]) : pieceColors[pPiece.key];
       if (outColor) {
         myCtx.fillStyle = col;
@@ -548,6 +639,25 @@ function drawPlayerBoard() {
     };
     if (circlePiece) botDrawWrapped(myCtx, myBoardEl, circlePiece.x, circlePiece.y, drawPiece);
     else drawPiece();
+  }
+
+  if (dropLines) {
+    myCtx.save(); myCtx.lineCap = 'round';
+    for (const dl of dropLines) {
+      if (dl.alpha <= 0) continue;
+      const lc = lighten(dl.color);
+      const offsets = [0, 3, 6], alphas = [1, 0.5, 0.22], widths = [2, 1.5, 1];
+      for (let i = 0; i < 3; i++) {
+        myCtx.globalAlpha = dl.alpha * alphas[i];
+        myCtx.strokeStyle = i === 0 ? lc : dl.color;
+        myCtx.lineWidth = widths[i];
+        myCtx.beginPath();
+        myCtx.moveTo(dl.x + dl.side * offsets[i], dl.y1);
+        myCtx.lineTo(dl.x + dl.side * offsets[i], dl.y2);
+        myCtx.stroke();
+      }
+    }
+    myCtx.restore();
   }
 }
 
@@ -644,6 +754,8 @@ export function startBotGame(pps, aiVersion = 1) {
   pBag = []; pQueue = []; pScore = 0; pLines = 0; pLevel = 1; pDropAcc = 0;
   pGarbageQueue = []; pComboCount = 0; pB2bCount = 0; pLinesSent = 0; pPieces = 0;
   pCancelLock();
+  _pBx = 0; _pBy = 0; _pBoardWrap.style.transform = '';
+  _pDropLines = []; _pMotionTrail = []; _pPrevPiece = null;
   updateCounters('bot-my-board-wrap', 0, 0);
   ['bot-my-lines','bot-my-lines-sent','bot-my-pieces','bot-my-apm','bot-my-pps'].forEach(id => {
     const el = document.getElementById(id); if (el) el.textContent = '0';
@@ -686,7 +798,7 @@ export function startBotGame(pps, aiVersion = 1) {
   cancelAnimationFrame(rafId);
 
   showCountdown(['bot-my-board-wrap','bot-opp-board-wrap'], () => {
-    startMusic('music/aperture.wav');
+    // startMusic('music/aperture.wav');
     pSpawnNext(); botSpawnNext();
     botRunLoop = true;
     lastTime = performance.now();
@@ -736,7 +848,7 @@ let sdBotActive = false, sdBotInterval = null;
 
 function pMoveH(dx) {
   if (!botRunLoop || !pPiece) return;
-  if (!collide(pPiece.shape, pPiece.x + dx, pPiece.y, pGrid)) { pPiece.x += dx; playSfx('move.wav'); pOnMove(); }
+  if (!collide(pPiece.shape, pPiece.x + dx, pPiece.y, pGrid)) { pPiece.x += dx; playSfx('move.wav'); _pBounceImpulse(dx, 0); pOnMove(); }
 }
 
 export function botStartDAS(dx) {

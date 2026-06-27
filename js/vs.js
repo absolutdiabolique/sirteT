@@ -2,7 +2,7 @@ import { COLS, ROWS, VS_SZ, LOCK_DELAY, LOCK_FLASH, ROTATIONS, SRS, SRS_I } from
 import { cfg, pieceColors } from './state.js';
 import { mkGrid, mkPiece, collide, buildSharedSeq } from './pieces.js';
 import { fmtTime, showToast, showAttackSplash, clearAttackSplash, showCancelSplash, clearCancelSplash, updateGarbageBar, showSplash, showRainbowSplash, updateCounters, drawMini, showCountdown } from './ui.js';
-import { playSfx, startMusic, stopMusic } from './sound.js';
+import { playSfx, playLineClearTone, stopMusic } from './sound.js';
 import { createBoard } from './board.js';
 import { getSocket, sendAttack } from './api.js';
 import { limboQueue, setupLimbo, getCircleOffsets } from './stupid.js';
@@ -174,7 +174,7 @@ function initVsGame() {
   myBoard.draw({ grid:vsGrid,  piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   oppBoard.draw({ grid:oppGrid, piece:null, ghostY:null, lockFlashing:false, lockBright:true, ghostOpacity:0, gridOn:true });
   showCountdown(['vs-my-board-wrap','vs-opp-board-wrap'], () => {
-    startMusic('music/aperture.wav');
+    // startMusic('music/aperture.wav');
     vsSpawnNext();
     vsRunLoop=true; vsLastTime=performance.now();
     vsGameStartMs=performance.now();
@@ -334,6 +334,7 @@ function vsClearLines(spin,pieceKey){
   else{rawBase=vsBaseAttack(cleared,spin)+(isB2BEligible?vsB2bBonus(vsB2bCount):0);}
   const garbage=Math.floor(rawBase*(1+0.2*vsComboCount));
   if(isB2BEligible||isPerfect||isColoredClear) vsB2bCount++; else vsB2bCount=0;
+  playLineClearTone(vsComboCount, cleared, spin);
   vsComboCount++;
   updateCounters('vs-my-board-wrap',vsComboCount,vsB2bCount);
   if(garbage>0){
@@ -341,7 +342,7 @@ function vsClearLines(spin,pieceKey){
     showAttackSplash('vs-my-board-wrap',garbage,(total)=>{
       if(!vsRunLoop||!roomId||!myPlayerId)return;
       sendAttack({ mode:'vs', lines:total, roomId, senderId:myPlayerId });
-    });
+    }, vsComboCount >= 2);
   }
   if(isPerfect||isColoredClear){
     showSplash('vs-my-board-wrap',null,pieceKey,spin,'left');

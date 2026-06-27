@@ -190,13 +190,13 @@ The timer counts down from **30 seconds**. The objective is to achieve the **hig
 Player competes against a local AI opponent. See section 14.
 
 ### 1v1 Multiplayer
-Real-time match against another player over Firebase. See section 15.
+Real-time match against another player over Firebase. See section 15. *(Currently under construction — not available.)*
 
 ### Quick Play
 Always-open ranked free-for-all over Firebase. See section 16.
 
 ### Custom Multi-Player Room
-2–8 players in a host-controlled private room over Firebase. See section 18.
+2–8 players in a host-controlled private room over Firebase. See section 19. *(Currently under construction — not available.)*
 
 ---
 
@@ -303,7 +303,9 @@ Attack and garbage mechanics are identical to 1v1 multiplayer (see section 15). 
 
 ---
 
-## 15. Multiplayer (1v1)
+## 15. Multiplayer (1v1) *(Under Construction)*
+
+> 1v1 Rooms are currently disabled. The Create and Join entry points are blocked on both the client and server. The specification below describes the intended behavior when the feature is enabled.
 
 ### Room System
 - Player 1 creates a room, receives a 6-character room code.
@@ -376,24 +378,34 @@ Spectators see both boards updated in real time from Firebase. They cannot inter
 ## 16. Quick Play
 
 ### Overview
-Quick Play is an always-open, ranked free-for-all mode played over Firebase. There is no room code or waiting lobby — joining puts the player immediately into the live game. Any number of players can be in the same session simultaneously, and new players can join at any time while others are already playing. **Requires a signed-in account.**
+Quick Play is an always-open free-for-all mode played over Firebase. There is no room code or waiting lobby — joining puts the player immediately into the live game. Any number of players can be in the same session simultaneously, and new players can join at any time while others are already playing. **No account required** — anonymous players are assigned a random `Player ########` identity for the session.
 
 ### Session Structure
 - A single shared session exists globally at all times (`quickplay/players/` in Firebase).
 - Each player writes their own state to `quickplay/players/{uid}`. Entries older than 30 seconds are considered stale and are ignored by other clients.
+- **Authenticated players** use their Firebase uid. **Anonymous players** are assigned a randomly generated session uid in the format `anon_########` (8-digit number), valid only for the current session.
 - Player entries are removed from Firebase on leave (`onDisconnect().remove()` ensures cleanup on browser crash or disconnect).
 
 ### Scoring
-Score is a floating-point value that increases through four mechanisms:
 
-| Source | Points |
+Score accumulates continuously at a rate equal to the current **climb speed** (points per second). There is no cap on score. Gravity uses the standard leveled formula (same as Marathon).
+
+#### Climb Speed Bar
+A thin 2px horizontal line is displayed centered at the bottom edge of the board. Its width grows proportionally with climb speed (90% board width = 3.0 climb speed, capped there visually).
+
+#### Climb Speed Mechanics
+| Event | Change |
 |---|---|
-| Passive (time) | +0.1 per second |
-| Regular line cleared | +1.0 |
-| Garbage line cleared | +0.5 |
-| KO (opponent tops out due to your garbage) | +15 |
+| Line cleared | +0.1 per line (e.g. Quad = +0.4) |
+| Attack line sent | +0.1 per attack line generated |
+| Decay | ×0.90 per second (applied each frame as `×0.90^(dt/1000)`) |
 
-There is no cap on score. Gravity uses the standard leveled formula (same as Marathon).
+Climb speed has a **minimum floor of 0.1** — it never decays below this value. Speed starts at 0.1 when a game begins.
+
+Each frame: `score += climbSpeed × (dt / 1000)`.
+
+#### KO Bonus
+When an opponent tops out due to your garbage, **+15** is added directly to your score (not to climb speed). Each KO is counted once.
 
 ### Attack Targeting
 When a player generates an attack (garbage lines), those lines are sent to a single target determined by score ranking:
@@ -402,27 +414,48 @@ When a player generates an attack (garbage lines), those lines are sent to a sin
 - **Highest score**: if you have the top score, attack goes to the player **immediately below** you.
 - **No valid target** (you are the only active player, or all others are dead/stale): attack goes nowhere.
 
-Attack entries are written to `quickplay/attacks/{targetUid}/` (any authenticated user may write; only the target may read). Targets consume and remove each entry as they receive it.
+Attacks are sent via the socket event `qp:sendAttack` (not HTTP), so both authenticated and anonymous players can send them. The server validates that the sender has an active QP session and is still alive before writing the attack to `quickplay/attacks/{targetUid}/`. Targets consume and remove each entry as they receive it.
 
 ### Garbage Application
 Incoming garbage is queued and applied on each piece lock (one segment per lock), identical to the 1v1 multiplayer mechanic. No cancellation — incoming garbage cannot be offset by outgoing attack.
 
 ### KO Detection
-When a player tops out, they write `killedBy: {uid}` to their own Firebase entry. All active clients monitor all player entries; upon seeing a `killedBy` equal to their own uid for a newly dead player, they award themselves +15 points. Each KO is tracked locally to prevent double-counting.
+When a player tops out, they write `killedBy: {uid}` to their own Firebase entry. All active clients monitor all player entries; upon seeing a `killedBy` equal to their own uid for a newly dead player, they award themselves +15 points directly (bypasses climb speed). Each KO is tracked locally to prevent double-counting.
 
 ### Board Layout
 The Quick Play screen has three columns:
 
 ```
-[Sidebar] [Next preview | Hold | Board + splashes | Garbage bar] [Players panel]
+[Sidebar] [Next preview | Hold | Board + splashes | Garbage bar] [Leaderboard]
 ```
 
 - The **sidebar** (left) shows the mode label, current score, and the current target's username.
 - The **board area** (center) is the same layout as vs Bot / 1v1: preview, hold, board with splashes, and a garbage bar.
-- The **players panel** (right, 160px) lists all active players sorted by score descending. Dead players are faded. The current target has a red left border.
+- The **leaderboard** (right, 180px) shows all active players sorted by score descending. The current player's row is highlighted with an accent background. Dead players are faded.
+  - If the player is in the **top 20**: all up to 20 entries are shown.
+  - If the player is **outside the top 20**: the top 10 entries are shown, a divider separates them, and then the 10 players nearest in rank to the current player are shown (centered on the player's rank, clamped so it never overlaps the top 10).
 
 ### Death
 When a player tops out, an overlay appears on their board showing "YOU DIED" and their final score. The Firebase entry is updated with `alive: false` and `killedBy`. The player can leave using the Leave button; the loop continues rendering the frozen board in the background so they can watch the panel.
+
+### QP Bots
+The server (`server/qpBots.js`) runs 8 persistent bot players that populate the Quick Play session. Bots write their state directly to Firebase using the Admin SDK — they appear in the leaderboard and targeting pool identically to human players.
+
+Each bot has an **APM** (actions per minute) value evenly distributed between 5 and 120 across the 8 bots. APM governs three properties:
+
+| Property | Formula |
+|---|---|
+| Climb speed (pts/s) | `0.1 + (apm / 120) × 2.2` + small random jitter |
+| Max attack size (lines) | `max(1, round((apm / 120) × 20))` — APM 5 → 1 line, APM 120 → 20 lines |
+| Kill threshold (lines in 5 s) | `10 + 40 × ((apm − 5) / 115)²` — concave-up; APM 5 → 10 lines, APM 120 → 50 lines |
+
+**Attack timing**: bots fire attacks at random intervals averaging `60000 / (apm / 18)` ms, with ±40% randomisation. Each attack picks a random line count from 1 to the bot's max attack size.
+
+**Targeting**: bots use the same 10-nearest weighted-by-speed logic as human players.
+
+**Death and respawn**: incoming attacks to a bot are summed in a rolling 5-second window. When the total exceeds the bot's kill threshold, the bot writes `alive: false` and `killedBy: <attacker uid>` to Firebase — human players receive the standard +15 KO bonus. The bot respawns with `score: 0` after a random 3–8 second delay.
+
+Bots are started when the HTTP server begins listening and run for the lifetime of the process. On `SIGTERM`/`SIGINT`, bot Firebase entries are removed before the process exits. If the server crashes without cleanup, stale bot entries are naturally filtered out by the 30-second `lastSeen` staleness check on all clients.
 
 ---
 
@@ -446,19 +479,21 @@ A trail of blurred ghost images follows the active piece as it moves. Each ghost
 - **Trail length** (0–10, default 5): how long the trail persists. Duration = `setting × 40ms`; max entries = `setting + 2`. **Setting to 0 disables motion blur entirely** (no separate On/Off toggle).
 - **Trail intensity** (0–10, default 5): scales trail opacity. 5 = default; 10 ≈ double brightness. Setting to 0 also disables the effect.
 - On **hard drop**, trail entries are injected for each intermediate row the piece passed through, producing a vertical streak along the drop path.
+- Applies in all game modes: Solo, vs Bot, vs (1v1), Marathon Rooms, and Quick Play.
 
 ### Board Bounce
 When the active piece moves left, right, or is hard-dropped, the `#board-wrap` element shifts slightly in that direction then glides back to center using exponential decay (no spring oscillation — no overshoot).
 
 - **Bounciness** (0–10, default 5): displacement magnitude per input. 0 = no movement.
 - **Elasticity** (1–10, default 8): controls the decay rate. Low = snaps back quickly; high = drifts back slowly. Implemented as `position × decay` per frame where `decay = 0.70 + (elasticity / 10) × 0.22`.
-
-Hard drops use a 1.8× stronger impulse than lateral moves.
+- Hard drops use a 1.8× stronger impulse than lateral moves.
+- Applies in all game modes: Solo, vs Bot, vs (1v1), Marathon Rooms, and Quick Play.
 
 ### Drop Trails
 When a piece is hard-dropped and travels at least one row, vertical speed lines appear along the left and right outer edges of the piece, spanning the drop distance. Three parallel lines per side spread outward with decreasing opacity. The lines fade out over ~420ms.
 
 - **Intensity** (0–10, default 5): scales line opacity. **Setting to 0 disables drop trails entirely** (no separate On/Off toggle).
+- Applies in all game modes: Solo, vs Bot, vs (1v1), Marathon Rooms, and Quick Play.
 
 ### Disintegrate
 When enabled, each cell in a cleared line breaks apart and animates off the board individually. On clear, each cell is captured at its pixel position before the row is removed from the grid. Particles are then rendered each frame with:
@@ -497,9 +532,13 @@ A post-process pixel-shift effect applied to the board canvas each frame. It spl
 
 Audio is handled by `front/js/sound.js`, which is imported by all game modules.
 
+### Preloading
+
+All SFX files are fetched as `ArrayBuffer`s immediately when the module loads — no `AudioContext` is needed for this step. When the `AudioContext` is first created (on the initial user interaction), all pre-fetched buffers are decoded in one batch into `AudioBuffer`s and stored in a cache. Subsequent calls to `playSfx` play directly from the decoded buffer with no file I/O or decode latency.
+
 ### Sound Effects
 
-One-shot sounds played via `playSfx(name)` (`new Audio(...)` fire-and-forget):
+One-shot sounds played via `playSfx(name)`. Uses `AudioBufferSourceNode` from the Web Audio API (low-latency, from the preloaded buffer cache). Falls back to `new Audio()` only if the buffer is not yet decoded.
 
 | File                   | Trigger                                          |
 |------------------------|--------------------------------------------------|
@@ -508,19 +547,29 @@ One-shot sounds played via `playSfx(name)` (`new Audio(...)` fire-and-forget):
 | `sfx/move.wav`         | Played when a piece moves left or right          |
 | `sfx/rotate.wav`       | Played on every rotation (including 180°)        |
 
-### Pitched Line-Clear Sound
-`clear.wav` is played via the Web Audio API (`playSfxPitched`) so its pitch can be shifted at playback time using `AudioBufferSourceNode.playbackRate`.
+### Line-Clear Tone
 
-- On each line clear, the playback rate is set to raise the pitch by **1 full tone (2 semitones) per combo count**, capped at **16 tones** above baseline.
-- Formula: `playbackRate = 2^(min(comboCount, 16) / 6)` — one full tone = 2 semitones = `2^(1/6)`.
-- The first clear in a sequence plays at normal pitch; each subsequent consecutive clear raises it by one more tone.
-- The decoded audio buffer is cached after the first load to avoid re-fetching.
+Every line clear triggers a synthesized piano-like tone via the Web Audio API (no audio file). The function `playLineClearTone(combo, lines, isSpin)` synthesizes two layers simultaneously:
+
+**Melody layer** — a piano-like tone using 4 stacked harmonic oscillators (sine waves at 1×, 2×, 3×, 4× the fundamental frequency) with a fast attack and exponential decay. Higher partials decay faster, approximating a real piano string.
+
+- Combo 0–11: ascending **whole-tone scale** starting at A3 (220 Hz). Each combo step raises the pitch by one whole tone: `freq = 220 × 2^(combo/6)`.
+- Combo 12+: the combo number is converted to **binary**, and each bit plays either A6 (1760 Hz, bit=1) or A5 (880 Hz, bit=0), spaced 70ms apart.
+
+**Impact layer** — a pitch-swept bass oscillator that drops rapidly from a start frequency to a deep rumble, giving each clear a physical "thump" feel:
+
+| Clear type       | Start freq | End freq | Decay  | Extra layer       |
+|------------------|-----------|----------|--------|-------------------|
+| 1–3 lines        | 150 Hz    | 45 Hz    | 150 ms | —                 |
+| Quad / Spin      | 220 Hz    | 35 Hz    | 220 ms | Sub-bass at 55 Hz |
+
+Impact amplitude scales with line count: 1-line (×0.3), 2-line (×0.5), 3-line (×0.72), 4-line/quad (×1.2). Spins add an additional ×0.45 on top of their line-count scale. Quads and spins also receive a secondary 55 Hz sub-oscillator for added rumble.
+
+The line-clear tone plays in all game modes: Solo, vs Bot, vs (1v1), Marathon Rooms, and Quick Play.
 
 ### Background Music
 
-`startMusic(src)` starts a looping track; `stopMusic()` stops and resets it. Only one track plays at a time — `startMusic` stops any current track before starting the new one.
-
-- `music/aperture.wav` starts at GO! in all game modes and stops when the game ends (top-out, win, or manual stop).
+`startMusic(src)` starts a looping track; `stopMusic()` stops and resets it. Only one track plays at a time. Background music is currently disabled in all game modes.
 
 ### Countdown Timing
 
@@ -540,7 +589,9 @@ The game timer starts only after the countdown callback fires — not during the
 
 ---
 
-## 19. Custom Multi-Player Room
+## 19. Custom Multi-Player Room *(Under Construction)*
+
+> Custom Rooms are currently disabled. The Create and Join entry points are blocked on both the client and server. The specification below describes the intended behavior when the feature is enabled.
 
 ### Overview
 A host creates a private room for 2–8 players. All players see a waiting-room lobby until the host starts the match.
@@ -645,8 +696,11 @@ When signed in to an account (see section 19), personal bests are synced to Fire
 ### Overview
 Players can create an account with an email and password. Accounts enable cross-device personal best sync and a persistent identity.
 
-### Registration
-- Requires a valid email address and password.
+### Registration *(Currently Unavailable)*
+Account creation is temporarily disabled. The "Create Account" button is shown but disabled in the UI, and the sign-up endpoints remain blocked. Sign-in for existing accounts continues to work normally.
+
+When registration reopens:
+- Requires a valid email address and a 6-digit verification code sent to that address.
 - On account creation, a **random username** is automatically assigned in the format `AdjectiveNoun####` (e.g. `SwiftFalcon3847`).
 - Usernames can be changed at any time from the Account screen.
 
@@ -659,7 +713,7 @@ Accessible from the main menu or the Stats screen. The screen has two states:
 
 **Guest (not signed in):**
 - Email and password fields
-- "Sign In" and "Create Account" buttons
+- "Sign In" button; "Create Account" is disabled with a "temporarily unavailable" notice
 - Error messages shown inline on failure
 
 **Signed in:**
@@ -682,7 +736,7 @@ Solo games (all modes) are recorded as they are played. On game over or sprint c
 ### Recording
 - **Action-level**: each player input (move left/right, rotate CW/CCW/180, hard drop, soft drop, hold) is stored with a timestamp in milliseconds relative to `gameStartMs`.
 - **Piece sequence**: every piece dequeued is appended to a `pieces` array, ensuring deterministic playback.
-- **Settings snapshot**: the active game settings (mode, sub-mode, gravity, kicks, hold, etc.) are embedded so the replay is self-contained.
+- **Settings snapshot**: all settings that affect gameplay are embedded — `gravMode`, `gravStatic`, `das`, `arr`, `sdf`, `kicks`, `holdMode`, `previewCount`, `boardWidth`, `boardHeight`, `overhang` — so the replay is fully self-contained and plays back correctly regardless of the player's current setup.
 
 ### File Format (version 1)
 ```json
@@ -709,7 +763,25 @@ Drag and drop a replay `.json` file onto the game window. An overlay reads **"DR
 - Events fire via `setTimeout` at their original recorded timestamps.
 - All player input is ignored during replay.
 - A **REPLAY** badge appears in the top-right of the board during playback.
+- If the replay has been verified (see below), a green **✓ VERIFIED** badge appears alongside the REPLAY badge.
 - On completion, a **"REPLAY DONE"** overlay is shown.
+
+### Replay Verification
+After a game ends, the result overlay offers two download options:
+
+- **Save Replay** — downloads the replay as a `.json` file immediately (no server call). Available to all players.
+- **Verify & Save** — **requires a signed-in account.** Submits the replay's deterministic content (`version`, `mode`, `subMode`, `settings`, `pieces`, `events`, `result`) to the server, which computes a SHA-256 hash using stable (sorted-key) JSON serialization and stores `{ hash, date }` under a randomly generated 12-character hex replay ID in Firebase (`replays/{id}`). The server returns `{ id, hash }`. Only the `id` is embedded into the replay file as `verified: { id }` — the hash is kept server-side only (including the hash in the file would be meaningless since anyone editing the file could recompute it). The downloaded file is suffixed with `_verified.json`.
+
+If the player is logged in and their username is available, it is embedded in the replay file as a `creator` field (excluded from the hash).
+
+#### Playback Verification
+When a verified replay is loaded (contains `verified.id`), the badge sequence is:
+
+1. **VERIFYING…** (grey) — shown immediately while the server is queried.
+2. The client computes the SHA-256 hash of the replay's deterministic fields locally (identical `stableStringify` implementation) and fetches the stored hash from `GET /api/replay/:id`.
+3. If the hashes match: badge updates to **✓ VERIFIED** (green).
+4. If the hashes differ: badge updates to **✗ TAMPERED** (red).
+5. If the server is unreachable or the ID is not found: badge is hidden.
 
 ### Speed Utility
 `random/speed_replay.py` accepts a replay `.json` file and a speed factor, dividing all event timestamps and `result.time` by the factor to produce a sped-up or slowed-down replay file. Output is written to `{basename}_x{factor}.json`.
@@ -722,8 +794,8 @@ Volume controls are in a dedicated **Sound** section of the Settings screen.
 
 | Setting      | Range  | Default | Description                                                              |
 |--------------|--------|---------|--------------------------------------------------------------------------|
-| SFX Volume   | 0–100% | 100%    | Volume applied to all one-shot sound effects at playback time.           |
-| Music Volume | 0–100% | 80%     | Volume applied to background music. Updates the live track immediately when changed. |
+| SFX Volume   | 0–100% | 100%    | Volume applied to all one-shot SFX and to synthesized line-clear tones at playback time. |
+| Music Volume | 0–100% | 80%     | Volume applied to background music. Updates the live track immediately when changed. Background music is currently disabled. |
 
 Both values persist via `localStorage`. The music volume slider calls `setMusicVolume()` in `sound.js` to update the currently playing `_bgm` track in real time without restarting it.
 
